@@ -60,6 +60,8 @@
     "postprocessing": "^6.36.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-draggable": "^4.4.6",
+    "react-resizable": "^3.0.5",
     "ses": "^1.10.0",
     "source-map-support": "^0.5.21",
     "three": "^0.173.0",

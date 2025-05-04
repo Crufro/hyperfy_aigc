@@ -16,6 +16,8 @@ import { ControlPriorities } from '../../core/extras/ControlPriorities'
 import { AppsPane } from './AppsPane'
 import { MenuMain } from './MenuMain'
 import { MenuApp } from './MenuApp'
+import { EditorUI } from './EditorUI'
+import { CanvasView } from './CanvasView'
 import {
   ChatIcon,
   ChevronDoubleUpIcon,
@@ -31,6 +33,7 @@ import {
 
 export function CoreUI({ world }) {
   const [ref, width, height] = useElemSize()
+  
   return (
     <div
       ref={ref}
@@ -38,14 +41,15 @@ export function CoreUI({ world }) {
         position: absolute;
         inset: 0;
         overflow: hidden;
+        background: #111; /* Example background for main container */
       `}
     >
-      {width > 0 && <Content world={world} width={width} height={height} />}
+      {width > 0 && <Content world={world} width={width} height={height} parentRef={ref} />}
     </div>
   )
 }
 
-function Content({ world, width, height }) {
+function Content({ world, width, height, parentRef }) {
   const ref = useRef()
   const small = width < 600
   const [ready, setReady] = useState(false)
@@ -57,6 +61,8 @@ function Content({ world, width, height }) {
   const [disconnected, setDisconnected] = useState(false)
   const [apps, setApps] = useState(false)
   const [kicked, setKicked] = useState(null)
+  const [editorMode, setEditorMode] = useState(false)
+  
   useEffect(() => {
     world.on('ready', setReady)
     world.on('player', setPlayer)
@@ -67,6 +73,8 @@ function Content({ world, width, height }) {
     world.on('avatar', setAvatar)
     world.on('kick', setKicked)
     world.on('disconnect', setDisconnected)
+    world.on('editor-mode', setEditorMode)
+    
     return () => {
       world.off('ready', setReady)
       world.off('player', setPlayer)
@@ -77,6 +85,7 @@ function Content({ world, width, height }) {
       world.off('avatar', setAvatar)
       world.off('kick', setKicked)
       world.off('disconnect', setDisconnected)
+      world.off('editor-mode', setEditorMode)
     }
   }, [])
 
@@ -94,6 +103,7 @@ function Content({ world, width, height }) {
     // elem.addEventListener('touchmove', onEvent)
     // elem.addEventListener('touchend', onEvent)
   }, [])
+  
   useEffect(() => {
     document.documentElement.style.fontSize = `${16 * world.prefs.ui}px`
     function onChange(changes) {
@@ -106,6 +116,43 @@ function Content({ world, width, height }) {
       world.prefs.off('change', onChange)
     }
   }, [])
+  
+  // Effect to switch the graphics viewport based on editor mode
+  useEffect(() => {
+    // Ensure graphics system is ready and world reference is stable
+    if (!ready || !world.graphics || !world.graphics.setViewport) return;
+
+    let targetViewport = null;
+
+    if (editorMode) {
+      // Use setTimeout to ensure the EditorUI and its children have rendered
+      const timerId = setTimeout(() => { 
+        targetViewport = document.getElementById('editor-canvas-area');
+        if (targetViewport) {
+          console.log("Switching viewport to Editor mode target:", targetViewport);
+          world.graphics.setViewport(targetViewport);
+        } else {
+           console.error("Editor canvas area not found!");
+        }
+      }, 0); // Execute after current render cycle
+      return () => clearTimeout(timerId); // Cleanup timer on mode change or unmount
+    } else {
+      // Play mode viewport is the parentRef (root div of CoreUI)
+      targetViewport = parentRef.current;
+      if (targetViewport) {
+        console.log("Switching viewport to Play mode target:", targetViewport);
+        world.graphics.setViewport(targetViewport);
+      } else {
+         console.error("CoreUI parentRef not found!");
+      }
+    }
+
+    // Note: No specific cleanup needed here for setViewport, 
+    // as the next run of the effect will handle switching back.
+    // Cleanup inside setViewport handles the observer.
+
+  }, [editorMode, ready, world.graphics, parentRef]); // Rerun when mode, readiness, graphics, or parentRef changes
+  
   return (
     <div
       ref={ref}
@@ -116,10 +163,15 @@ function Content({ world, width, height }) {
         display: ${visible ? 'block' : 'none'};
       `}
     >
+      {ready && !editorMode && (
+        <div css={css`position: absolute; inset: 0; z-index: -1; /* Behind other UI */`}>
+          <CanvasView world={world} />
+        </div>
+      )}
       {disconnected && <Disconnected />}
-      <Reticle world={world} />
+      {!editorMode && <Reticle world={world} />}
       {<Toast world={world} />}
-      {ready && <Side world={world} player={player} menu={menu} />}
+      {ready && !editorMode && <Side world={world} player={player} menu={menu} />}
       {ready && menu?.type === 'app' && code && (
         <CodeEditor key={`code-${menu.app.data.id}`} world={world} app={menu.app} blur={menu.blur} />
       )}
@@ -127,7 +179,9 @@ function Content({ world, width, height }) {
       {apps && <AppsPane world={world} close={() => world.ui.toggleApps()} />}
       {!ready && <LoadingOverlay />}
       {kicked && <KickedOverlay code={kicked} />}
-      {ready && isTouch && <TouchBtns world={world} />}
+      {ready && isTouch && !editorMode && <TouchBtns world={world} />}
+      
+      {ready && <EditorUI world={world} />}
     </div>
   )
 }
@@ -685,16 +739,28 @@ function ActionIcon({ icon: Icon }) {
 
 function Reticle({ world }) {
   const [visible, setVisible] = useState(world.controls.pointer.locked)
-  const [buildMode, setBuildMode] = useState(world.builder.enabled)
+  const [editorMode, setEditorMode] = useState(world.builder.enabled)
+  
   useEffect(() => {
-    world.on('pointer-lock', setVisible)
-    world.on('build-mode', setBuildMode)
+    const handlePointerLock = (locked) => {
+      setVisible(locked);
+    };
+    
+    const handleEditorMode = (enabled) => {
+      setEditorMode(enabled);
+    };
+    
+    world.on('pointer-lock', handlePointerLock);
+    world.on('editor-mode', handleEditorMode);
+    
     return () => {
-      world.off('pointer-lock', setVisible)
-      world.off('build-mode', setBuildMode)
-    }
-  }, [])
-  if (!visible) return null
+      world.off('pointer-lock', handlePointerLock);
+      world.off('editor-mode', handleEditorMode);
+    };
+  }, []);
+  
+  if (!visible) return null;
+  
   return (
     <div
       className='reticle'
@@ -708,8 +774,8 @@ function Reticle({ world }) {
           width: 20px;
           height: 20px;
           border-radius: 10px;
-          border: 2px solid ${buildMode ? '#ff4d4d' : 'white'};
-          mix-blend-mode: ${buildMode ? 'normal' : 'difference'};
+          border: 2px solid ${editorMode ? '#ff4d4d' : 'white'};
+          mix-blend-mode: ${editorMode ? 'normal' : 'difference'};
         }
       `}
     >

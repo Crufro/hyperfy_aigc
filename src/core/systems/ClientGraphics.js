@@ -95,14 +95,47 @@ export class ClientGraphics extends System {
     this.composer.addPass(this.effectPass)
     this.world.prefs.on('change', this.onPrefsChange)
     this.resizer = new ResizeObserver(() => {
-      this.resize(this.viewport.offsetWidth, this.viewport.offsetHeight)
+      if (this.viewport) {
+        this.resize(this.viewport.offsetWidth, this.viewport.offsetHeight)
+      }
     })
-    this.viewport.appendChild(this.renderer.domElement)
-    this.resizer.observe(this.viewport)
+    if (this.viewport) {
+      this.viewport.appendChild(this.renderer.domElement)
+      this.resizer.observe(this.viewport)
+    } else {
+      console.error("ClientGraphics initialized without a viewport!")
+    }
 
     this.xrWidth = null
     this.xrHeight = null
     this.xrDimensionsNeeded = false
+  }
+
+  setViewport(newViewport) {
+    if (!newViewport || this.viewport === newViewport) {
+      return
+    }
+
+    console.log('Setting new graphics viewport:', newViewport)
+
+    if (this.viewport && this.resizer) {
+      this.resizer.unobserve(this.viewport)
+    }
+    
+    this.viewport = newViewport
+
+    try {
+      this.viewport.appendChild(this.renderer.domElement)
+
+      if (this.resizer) {
+        this.resizer.observe(this.viewport)
+      }
+
+      this.resize(this.viewport.offsetWidth, this.viewport.offsetHeight)
+      
+    } catch (error) {
+      console.error("Error setting new viewport in ClientGraphics:", error)
+    }
   }
 
   start() {

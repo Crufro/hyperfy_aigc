@@ -1,12 +1,14 @@
 import { App } from '../entities/App'
 import { PlayerLocal } from '../entities/PlayerLocal'
 import { PlayerRemote } from '../entities/PlayerRemote'
+import { FreeCamOrb } from '../entities/FreeCamOrb'
 import { System } from './System'
 
 const Types = {
   app: App,
   playerLocal: PlayerLocal,
   playerRemote: PlayerRemote,
+  'freecam-orb': FreeCamOrb,
 }
 
 /**

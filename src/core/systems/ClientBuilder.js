@@ -4,6 +4,7 @@ import { cloneDeep, isBoolean } from 'lodash-es'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 
 import { System } from './System'
+import { FreeCamOrb } from '../entities/FreeCamOrb'
 
 import { hashFile } from '../utils-client'
 import { hasRole, uuid } from '../utils'
@@ -33,7 +34,7 @@ const modeLabels = {
  *
  * - runs on the client
  * - listens for files being drag and dropped onto the window and handles them
- * - handles build mode
+ * - handles editor mode
  *
  */
 export class ClientBuilder extends System {
@@ -88,7 +89,7 @@ export class ClientBuilder extends System {
     const actions = []
     if (!this.enabled) {
       if (this.canBuild()) {
-        actions.push({ type: 'tab', label: 'Build Mode' })
+        actions.push({ type: 'tab', label: 'Editor Mode' })
       }
     }
     if (this.enabled && !this.selected) {
@@ -99,7 +100,7 @@ export class ClientBuilder extends System {
       actions.push({ type: 'keyP', label: 'Pin' })
       actions.push({ type: 'keyX', label: 'Destroy' })
       actions.push({ type: 'space', label: 'Jump / Fly (Double-Tap)' })
-      actions.push({ type: 'tab', label: 'Exit Build Mode' })
+      actions.push({ type: 'tab', label: 'Exit Editor Mode' })
     }
     if (this.enabled && this.selected && this.mode === 'grab') {
       actions.push({ type: 'mouseLeft', label: 'Place' })
@@ -111,7 +112,7 @@ export class ClientBuilder extends System {
       actions.push({ type: 'keyX', label: 'Destroy' })
       actions.push({ type: 'controlLeft', label: 'No Snap (Hold)' })
       actions.push({ type: 'space', label: 'Jump / Fly (Double-Tap)' })
-      actions.push({ type: 'tab', label: 'Exit Build Mode' })
+      actions.push({ type: 'tab', label: 'Exit Editor Mode' })
     }
     if (this.enabled && this.selected && (this.mode === 'translate' || this.mode === 'rotate')) {
       actions.push({ type: 'mouseLeft', label: 'Select / Transform' })
@@ -121,13 +122,13 @@ export class ClientBuilder extends System {
       actions.push({ type: 'keyX', label: 'Destroy' })
       actions.push({ type: 'controlLeft', label: 'No Snap (Hold)' })
       actions.push({ type: 'space', label: 'Jump / Fly (Double-Tap)' })
-      actions.push({ type: 'tab', label: 'Exit Build Mode' })
+      actions.push({ type: 'tab', label: 'Exit Editor Mode' })
     }
     this.control.setActions(actions)
   }
 
   update(delta) {
-    // toggle build
+    // toggle editor mode
     if (this.control.tab.pressed) {
       this.toggle()
     }
@@ -139,7 +140,7 @@ export class ClientBuilder extends System {
     if (this.selected && this.selected?.data.mover !== this.world.network.id) {
       this.select(null)
     }
-    // stop here if build mode not enabled
+    // stop here if editor mode not enabled
     if (!this.enabled) {
       return
     }
@@ -437,10 +438,79 @@ export class ClientBuilder extends System {
     if (!this.canBuild()) return
     enabled = isBoolean(enabled) ? enabled : !this.enabled
     if (this.enabled === enabled) return
+    
+    // Store previous state
+    const wasEnabled = this.enabled
+    
+    // Update state
     this.enabled = enabled
-    if (!this.enabled) this.select(null)
+    
+    if (this.enabled) {
+      // Entering editor mode
+      
+      // First deselect any app
+      if (this.selected) {
+        this.select(null)
+      }
+      
+      // Create the flying orb entity using the current camera
+      this.createFreeCamOrb()
+    } else {
+      // Exiting editor mode
+      
+      // First deselect any app
+      if (this.selected) {
+        this.select(null)
+      }
+      
+      // Clean up the orb and return to player
+      this.destroyFreeCamOrb()
+    }
+    
     this.updateActions()
-    this.world.emit('build-mode', enabled)
+    this.world.emit('editor-mode', enabled)
+  }
+
+  createFreeCamOrb() {
+    // Get the player's camera position and rotation
+    const player = this.world.entities.player;
+    const playerCamPosition = player.control.camera.position.clone();
+    const playerCamRotation = player.control.camera.quaternion.clone();
+    
+    // Create orb data
+    const orbData = {
+      id: `orb-${this.world.network.id}`,
+      type: 'freecam-orb',
+      position: playerCamPosition.toArray(),
+      rotation: playerCamRotation.toArray(),
+      isFreeCamOrb: true
+    }
+    
+    // Create the orb entity
+    this.freeCamOrb = new FreeCamOrb(this.world, orbData, true)
+    
+    // Hide the player's model while in editor mode
+    if (player.avatar) {
+      this.playerVisibleBeforeOrb = player.avatar.visible
+      player.avatar.visible = false
+    }
+  }
+  
+  destroyFreeCamOrb() {
+    if (this.freeCamOrb) {
+      // Store current orb position for potential use
+      const orbPosition = this.freeCamOrb.base.position.clone()
+      
+      // Clean up the orb
+      this.freeCamOrb.destroy()
+      this.freeCamOrb = null
+      
+      // Show the player's model again
+      const player = this.world.entities.player
+      if (player && player.avatar) {
+        player.avatar.visible = this.playerVisibleBeforeOrb !== undefined ? this.playerVisibleBeforeOrb : true
+      }
+    }
   }
 
   setMode(mode) {
@@ -656,7 +726,7 @@ export class ClientBuilder extends System {
     if (!file) return
     // slight delay to ensure we get updated pointer position from window focus
     await new Promise(resolve => setTimeout(resolve, 100))
-    // ensure we in build mode
+    // ensure we in editor mode
     this.toggle(true)
     // add it!
     const maxSize = this.world.network.maxUploadSize * 1024 * 1024
