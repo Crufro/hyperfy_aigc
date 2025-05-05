@@ -45,6 +45,7 @@ export class Entities extends System {
     }
     const entity = new Entity(this.world, data, local)
     this.items.set(entity.data.id, entity)
+    this.world.events.emit('entityAdded', entity)
     if (data.type === 'player') {
       this.players.set(entity.data.id, entity)
       // on the client remote players emit enter events here.
@@ -65,6 +66,9 @@ export class Entities extends System {
   remove(id) {
     const entity = this.items.get(id)
     if (!entity) console.warn(`tried to remove entity that did not exist: ${id}`)
+    if (entity) {
+      this.world.events.emit('entityRemoved', entity)
+    }
     if (entity.isPlayer) this.players.delete(entity.data.id)
     entity.destroy()
     this.items.delete(id)

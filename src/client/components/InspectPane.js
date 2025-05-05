@@ -30,7 +30,6 @@ import {
 } from 'lucide-react'
 
 import { hashFile } from '../../core/utils-client'
-import { usePane } from './usePane'
 import { useUpdate } from './useUpdate'
 import { cls } from './cls'
 import { exportApp } from '../../core/extras/appTools'
@@ -47,15 +46,10 @@ import {
   InputTextarea,
 } from './Inputs'
 import { isArray } from 'lodash-es'
+import { Fields } from './FieldsPanel'
 
-export function InspectPane({ world, entity }) {
-  if (entity.isApp) {
-    return <AppPane world={world} app={entity} />
-  }
-  if (entity.isPlayer) {
-    return <PlayerPane world={world} player={entity} />
-  }
-}
+// Deprecated InspectPane - logic moved to individual panel components
+// export function InspectPane({ world, entity }) { ... }
 
 const extToType = {
   glb: 'model',
@@ -63,183 +57,34 @@ const extToType = {
 }
 const allowedModels = ['glb', 'vrm']
 
-export function AppPane({ world, app }) {
-  const paneRef = useRef()
-  const headRef = useRef()
+// --- New App Main Panel --- 
+export function AppMainPanel({ world, app }) {
   const [blueprint, setBlueprint] = useState(app.blueprint)
   const canEdit = !blueprint.frozen && hasRole(world.entities.player.data.roles, 'admin', 'builder')
-  const [tab, setTab] = useState('main')
-  usePane('inspect', paneRef, headRef)
-  useEffect(() => {
-    window.app = app
-  }, [])
+  const [fileInputKey, setFileInputKey] = useState(0)
+
+  // Update blueprint state if the app's blueprint changes externally
   useEffect(() => {
     const onModify = bp => {
-      if (bp.id !== blueprint.id) return
-      setBlueprint(bp)
+      if (bp.id === app.blueprint?.id) {
+        setBlueprint(bp)
+      }
     }
     world.blueprints.on('modify', onModify)
     return () => {
       world.blueprints.off('modify', onModify)
     }
-  }, [])
+  }, [world.blueprints, app.blueprint?.id])
+  
   const download = async () => {
     try {
-      const file = await exportApp(app.blueprint, world.loader.loadFile)
+      const file = await exportApp(blueprint, world.loader.loadFile)
       downloadFile(file)
     } catch (err) {
       console.error(err)
     }
   }
 
-  return (
-    <div
-      ref={paneRef}
-      className='apane'
-      css={css`
-        position: absolute;
-        top: 20px;
-        left: 20px;
-        width: 320px;
-        max-height: calc(100vh - 40px);
-        background: rgba(22, 22, 28, 1);
-        border: 1px solid rgba(255, 255, 255, 0.03);
-        border-radius: 10px;
-        box-shadow: rgba(0, 0, 0, 0.5) 0px 10px 30px;
-        pointer-events: auto;
-        display: flex;
-        flex-direction: column;
-        .apane-head {
-          height: 50px;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-          display: flex;
-          align-items: center;
-          padding: 0 10px;
-          &-icon {
-            width: 60px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            svg {
-              margin-left: 10px;
-            }
-          }
-          &-tabs {
-            flex: 1;
-            align-self: stretch;
-            display: flex;
-            justify-content: center;
-          }
-          &-tab {
-            align-self: stretch;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 16px 0 0;
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.5);
-            &:hover:not(.active) {
-              cursor: pointer;
-              color: rgba(255, 255, 255, 0.7);
-            }
-            &.active {
-              border-bottom: 1px solid white;
-              margin-bottom: -1px;
-              color: white;
-            }
-          }
-
-          &-btns {
-            width: 60px;
-            display: flex;
-            align-items: center;
-            &.right {
-              justify-content: flex-end;
-            }
-          }
-
-          &-btn {
-            color: #515151;
-            width: 30px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            &:hover {
-              cursor: pointer;
-              color: white;
-            }
-          }
-        }
-        .apane-download {
-          border-top: 1px solid rgba(255, 255, 255, 0.05);
-          height: 50px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          svg {
-            margin-right: 8px;
-          }
-          span {
-            font-size: 14px;
-          }
-          &:hover {
-            cursor: pointer;
-          }
-        }
-      `}
-    >
-      <div className='apane-head' ref={headRef}>
-        <div className='apane-head-icon'>
-          <ZapIcon size={16} />
-        </div>
-        <div className='apane-head-tabs'>
-          <div className={cls('apane-head-tab', { active: tab === 'main' })} onClick={() => setTab('main')}>
-            <span>App</span>
-          </div>
-          {canEdit && (
-            <div className={cls('apane-head-tab', { active: tab === 'meta' })} onClick={() => setTab('meta')}>
-              <span>Meta</span>
-            </div>
-          )}
-          <div className={cls('apane-head-tab', { active: tab === 'nodes' })} onClick={() => setTab('nodes')}>
-            <span>Nodes</span>
-          </div>
-        </div>
-        <div className='apane-head-btns right'>
-          {canEdit && (
-            <div
-              className='apane-head-btn'
-              onClick={() => {
-                world.emit('inspect', null)
-                app.destroy(true)
-              }}
-            >
-              <Trash2Icon size={16} />
-            </div>
-          )}
-          <div className='apane-head-btn' onClick={() => world.emit('inspect', null)}>
-            <XIcon size={20} />
-          </div>
-        </div>
-      </div>
-      {tab === 'main' && (
-        <>
-          <AppPaneMain world={world} app={app} blueprint={blueprint} canEdit={canEdit} />
-          <div className='apane-download' onClick={download}>
-            <DownloadIcon size={16} />
-            <span>Download</span>
-          </div>
-        </>
-      )}
-      {tab === 'meta' && <AppPaneMeta world={world} app={app} blueprint={blueprint} />}
-      {tab === 'nodes' && <AppPaneNodes app={app} />}
-    </div>
-  )
-}
-
-function AppPaneMain({ world, app, blueprint, canEdit }) {
-  const [fileInputKey, setFileInputKey] = useState(0)
   const downloadModel = e => {
     if (e.shiftKey) {
       e.preventDefault()
@@ -248,247 +93,230 @@ function AppPaneMain({ world, app, blueprint, canEdit }) {
       downloadFile(file)
     }
   }
+
   const changeModel = async e => {
     setFileInputKey(n => n + 1)
     const file = e.target.files[0]
     if (!file) return
     const ext = file.name.split('.').pop()
     if (!allowedModels.includes(ext)) return
-    // immutable hash the file
     const hash = await hashFile(file)
-    // use hash as glb filename
     const filename = `${hash}.${ext}`
-    // canonical url to this file
     const url = `asset://${filename}`
-    // cache file locally so this client can insta-load it
     const type = extToType[ext]
     world.loader.insert(type, url, file)
-    // update blueprint locally (also rebuilds apps)
     const version = blueprint.version + 1
     world.blueprints.modify({ id: blueprint.id, version, model: url })
-    // upload model
     await world.network.upload(file)
-    // broadcast blueprint change to server + other clients
     world.network.send('blueprintModified', { id: blueprint.id, version, model: url })
   }
-  const editCode = () => {
-    world.emit('code', true)
-  }
+
   const toggle = async key => {
     const value = !blueprint[key]
     const version = blueprint.version + 1
     world.blueprints.modify({ id: blueprint.id, version, [key]: value })
     world.network.send('blueprintModified', { id: blueprint.id, version, [key]: value })
   }
+
   return (
     <div
-      className='amain noscrollbar'
+      className='app-main-panel noscrollbar' // Use specific class
       css={css`
-        flex: 1;
-        padding: 0 20px 10px;
-        max-height: 500px;
-        overflow-y: auto;
+        height: 100%; 
         display: flex;
         flex-direction: column;
-        align-items: stretch;
-        .amain-image {
-          align-self: center;
-          width: 120px;
-          height: 120px;
-          background-position: center;
-          background-size: cover;
-          border-radius: 10px;
-          margin: 20px 0 0;
-        }
-        .amain-name {
-          text-align: center;
-          font-size: 18px;
-          font-weight: 500;
-          margin: 16px 0 0;
-        }
-        .amain-author {
-          text-align: center;
-          font-size: 14px;
-          color: rgba(255, 255, 255, 0.5);
-          margin: 7px 0 0;
-          a {
-            color: #00a7ff;
-          }
-        }
-        .amain-desc {
-          font-size: 14px;
-          color: rgba(255, 255, 255, 0.5);
-          margin: 16px 0 0;
-        }
-        .amain-line {
-          border-top: 1px solid rgba(255, 255, 255, 0.05);
-          margin: 0 -20px;
-          &.mt {
-            margin-top: 20px;
-          }
-          &.mb {
-            margin-bottom: 20px;
-          }
-        }
-        .amain-btns {
+        overflow: hidden; /* Contains scroll */
+        background-color: #303030; /* Match editor panel background */
+        color: #ddd;
+
+        .app-main-content { /* Scrollable content area */
+          flex: 1;
+          overflow-y: auto;
+          padding: 10px;
           display: flex;
-          gap: 5px;
-          margin: 0 0 5px;
-          &-btn {
-            flex: 1;
-            background: #252630;
-            border-radius: 10px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            cursor: pointer;
-            input {
-              position: absolute;
-              top: -9999px;
-            }
-            svg {
-              margin: 0 8px 0 0;
-            }
-            span {
-              font-size: 14px;
-            }
-          }
+          flex-direction: column;
+          align-items: stretch;
         }
-        .amain-btns2 {
+
+        .panel-button {
+          background: #444;
+          border: 1px solid #555;
+          border-radius: 3px;
+          padding: 5px 10px;
+          margin: 5px 0;
           display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          font-size: 12px;
+          color: #ddd;
+          &:hover { background: #555; }
+          svg { margin-right: 6px; }
+          input[type="file"] { display: none; }
+        }
+        
+        .panel-toggle-section {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr); /* Two columns */
           gap: 5px;
-          &-btn {
-            flex: 1;
+          margin: 10px 0;
+        }
+        
+        .panel-toggle-btn {
             background: #252630;
-            border-radius: 10px;
+            border-radius: 5px;
+            padding: 8px 5px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 10px 0;
-            color: #606275;
+            color: #8a8c9e; /* Default color */
             cursor: pointer;
+            text-align: center;
+            font-size: 11px;
+            border: 1px solid transparent;
             svg {
-              margin: 0 0 5px;
+              margin-bottom: 4px;
+              color: #606275; /* Icon default color */
             }
-            span {
-              font-size: 12px;
-            }
+            &:hover { background-color: #30313a; }
             &.active {
               color: white;
-              &.blue svg {
-                color: #5097ff;
+              border-color: #5097ff; 
+              svg {
+                /* Keep icon color consistent or change based on state */
               }
-              &.yellow svg {
-                color: #fbff50;
-              }
-              &.red svg {
-                color: #ff5050;
-              }
-              &.green svg {
-                color: #50ff51;
-              }
+              &.green svg { color: #50ff51; }
+              &.blue svg { color: #5097ff; }
+              &.red svg { color: #ff5050; }
+              &.yellow svg { color: #fbff50; }
             }
-          }
         }
-        .amain-fields {
-          margin-top: 20px;
+
+        .panel-section-divider {
+          border-top: 1px solid #1a1a1a;
+          margin: 10px -10px; /* Extend to edges */
         }
+        
+        .panel-fields-container {
+          margin-top: 5px;
+        }
+        
+        .panel-top-actions { /* Container for top buttons */
+            display: flex;
+            justify-content: space-between; /* Space out buttons */
+            margin-bottom: 10px;
+            gap: 10px;
+            .panel-button { margin: 0; flex: 1; }
+        }
+        
       `}
     >
-      {blueprint.image && (
-        <div
-          className='amain-image'
-          css={css`
-            background-image: ${blueprint.image ? `url(${world.resolveURL(blueprint.image.url)})` : 'none'};
-          `}
-        />
-      )}
-      {blueprint.name && <div className='amain-name'>{blueprint.name}</div>}
-      {blueprint.author && (
-        <div className='amain-author'>
-          <span>by </span>
-          {blueprint.url && (
-            <a href={world.resolveURL(blueprint.url)} target='_blank'>
-              {blueprint.author || 'Unknown'}
-            </a>
+      <div className='app-main-content'>
+          {/* Top Buttons: Model & Download */} 
+          {canEdit && (
+              <div className="panel-top-actions">
+                   <label className='panel-button' onClick={downloadModel}>
+                    <input key={fileInputKey} type='file' accept='.glb,.vrm' onChange={changeModel} />
+                    <BoxIcon size={14} />
+                    <span>Model</span>
+                   </label>
+                   <div className='panel-button' onClick={download}>
+                    <DownloadIcon size={14} />
+                    <span>Download BP</span>
+                   </div>
+              </div>
           )}
-          {!blueprint.url && <span>{blueprint.author || 'Unknown'}</span>}
-        </div>
-      )}
-      {blueprint.desc && <div className='amain-desc'>{blueprint.desc}</div>}
-      {canEdit && (
-        <>
-          <div className='amain-line mt mb' />
-          <div className='amain-btns'>
-            <label className='amain-btns-btn' onClick={downloadModel}>
-              <input key={fileInputKey} type='file' accept='.glb,.vrm' onChange={changeModel} />
-              <BoxIcon size={16} />
-              <span>Model</span>
-            </label>
-            <div className='amain-btns-btn' onClick={editCode}>
-              <FileCode2Icon size={16} />
-              <span>Code</span>
-            </div>
-          </div>
-          <div className='amain-btns2'>
-            <div
-              className={cls('amain-btns2-btn green', { active: blueprint.preload })}
-              onClick={() => toggle('preload')}
-            >
-              <CircleCheckIcon size={12} />
-              <span>Preload</span>
-            </div>
-            <div className={cls('amain-btns2-btn blue', { active: blueprint.public })} onClick={() => toggle('public')}>
-              <EarthIcon size={12} />
-              <span>Public</span>
-            </div>
-            <div className={cls('amain-btns2-btn red', { active: blueprint.locked })} onClick={() => toggle('locked')}>
-              <LockKeyholeIcon size={12} />
-              <span>Lock</span>
-            </div>
-            <div
-              className={cls('amain-btns2-btn yellow', { active: blueprint.unique })}
-              onClick={() => toggle('unique')}
-            >
-              <SparkleIcon size={12} />
-              <span>Unique</span>
-            </div>
-          </div>
-          {app.fields.length > 0 && <div className='amain-line mt' />}
-          <div className='amain-fields'>
+          {!canEdit && blueprint.model && (
+               <div className='panel-button' style={{ justifyContent: 'flex-start', marginBottom: '10px', cursor: 'default' }} onClick={downloadModel}>
+                   <BoxIcon size={14} />
+                   <span>Model: {blueprint.model.split('/').pop()}</span>
+               </div>
+          )}
+
+          {/* Toggles */} 
+          {canEdit && (
+              <div className='panel-toggle-section'>
+                  <div
+                      className={cls('panel-toggle-btn green', { active: blueprint.preload })}
+                      onClick={() => toggle('preload')}
+                  >
+                      <CircleCheckIcon size={12} />
+                      <span>Preload</span>
+                  </div>
+                  <div className={cls('panel-toggle-btn blue', { active: blueprint.public })} onClick={() => toggle('public')}>
+                      <EarthIcon size={12} />
+                      <span>Public</span>
+                  </div>
+                  <div className={cls('panel-toggle-btn red', { active: blueprint.locked })} onClick={() => toggle('locked')}>
+                      <LockKeyholeIcon size={12} />
+                      <span>Lock</span>
+                  </div>
+                  <div
+                      className={cls('panel-toggle-btn yellow', { active: blueprint.unique })}
+                      onClick={() => toggle('unique')}
+                  >
+                      <SparkleIcon size={12} />
+                      <span>Unique</span>
+                  </div>
+              </div>
+          )}
+          
+          {/* Fields */} 
+          {app.fields?.length > 0 && <div className='panel-section-divider' />} 
+          <div className='panel-fields-container'>
             <Fields app={app} blueprint={blueprint} />
           </div>
-        </>
-      )}
+      </div>
     </div>
   )
 }
 
-function AppPaneMeta({ world, app, blueprint }) {
+// --- New App Meta Panel --- 
+export function AppMetaPanel({ world, app }) {
+  const [blueprint, setBlueprint] = useState(app.blueprint) 
+  const canEdit = !blueprint.frozen && hasRole(world.entities.player.data.roles, 'admin', 'builder')
+
+  // Update blueprint state if the app's blueprint changes externally
+  useEffect(() => {
+    const onModify = bp => {
+      if (bp.id === app.blueprint?.id) {
+        setBlueprint(bp)
+      }
+    }
+    world.blueprints.on('modify', onModify)
+    return () => {
+      world.blueprints.off('modify', onModify)
+    }
+  }, [world.blueprints, app.blueprint?.id])
+
   const set = async (key, value) => {
+    if (!canEdit) return;
     const version = blueprint.version + 1
     world.blueprints.modify({ id: blueprint.id, version, [key]: value })
     world.network.send('blueprintModified', { id: blueprint.id, version, [key]: value })
   }
+
   return (
     <div
-      className='ameta noscrollbar'
+      className='app-meta-panel noscrollbar'
       css={css`
-        flex: 1;
-        padding: 20px 20px 10px;
-        max-height: 500px;
+        height: 100%; 
         overflow-y: auto;
-        .ameta-field {
+        padding: 10px;
+        background-color: #303030; /* Match editor panel background */
+        color: #ddd;
+        
+        .meta-field {
           display: flex;
-          align-items: center;
-          margin: 0 0 10px;
+          align-items: flex-start; /* Align label top */
+          margin-bottom: 8px;
           &-label {
-            width: 90px;
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.5);
+            width: 80px;
+            padding-top: 5px; /* Align with input text */
+            font-size: 11px;
+            color: #aaa;
+            flex-shrink: 0;
           }
           &-input {
             flex: 1;
@@ -496,209 +324,55 @@ function AppPaneMeta({ world, app, blueprint }) {
         }
       `}
     >
-      <div className='ameta-field'>
-        <div className='ameta-field-label'>Name</div>
-        <div className='ameta-field-input'>
-          <InputText value={blueprint.name} onChange={name => set('name', name)} />
+      <div className='meta-field'>
+        <div className='meta-field-label'>Name</div>
+        <div className='meta-field-input'>
+          <InputText value={blueprint.name || ''} onChange={name => set('name', name)} readOnly={!canEdit} />
         </div>
       </div>
-      <div className='ameta-field'>
-        <div className='ameta-field-label'>Image</div>
-        <div className='ameta-field-input'>
-          <InputFile world={world} kind='texture' value={blueprint.image} onChange={image => set('image', image)} />
+      <div className='meta-field'>
+        <div className='meta-field-label'>Image</div>
+        <div className='meta-field-input'>
+          <InputFile world={world} kind='texture' value={blueprint.image} onChange={image => set('image', image)} readOnly={!canEdit} />
         </div>
       </div>
-      <div className='ameta-field'>
-        <div className='ameta-field-label'>Author</div>
-        <div className='ameta-field-input'>
-          <InputText value={blueprint.author} onChange={author => set('author', author)} />
+      <div className='meta-field'>
+        <div className='meta-field-label'>Author</div>
+        <div className='meta-field-input'>
+          <InputText value={blueprint.author || ''} onChange={author => set('author', author)} readOnly={!canEdit} />
         </div>
       </div>
-      <div className='ameta-field'>
-        <div className='ameta-field-label'>URL</div>
-        <div className='ameta-field-input'>
-          <InputText value={blueprint.url} onChange={url => set('url', url)} />
+      <div className='meta-field'>
+        <div className='meta-field-label'>URL</div>
+        <div className='meta-field-input'>
+          <InputText value={blueprint.url || ''} onChange={url => set('url', url)} readOnly={!canEdit} />
         </div>
       </div>
-      <div className='ameta-field'>
-        <div className='ameta-field-label'>Description</div>
-        <div className='ameta-field-input'>
-          <InputTextarea value={blueprint.desc} onChange={desc => set('desc', desc)} />
+      <div className='meta-field'>
+        <div className='meta-field-label'>Description</div>
+        <div className='meta-field-input'>
+          <InputTextarea value={blueprint.desc || ''} onChange={desc => set('desc', desc)} readOnly={!canEdit} />
         </div>
       </div>
     </div>
   )
 }
 
-function AppPaneNodes({ app }) {
-  const [selectedNode, setSelectedNode] = useState(null)
-  const rootNode = useMemo(() => app.getNodes(), [])
+// --- New App Nodes Panel --- 
 
-  useEffect(() => {
-    if (rootNode && !selectedNode) {
-      setSelectedNode(rootNode)
-    }
-  }, [rootNode])
-
-  // Helper function to safely get vector string
-  const getVectorString = vec => {
-    if (!vec || typeof vec.x !== 'number') return null
-    return `${vec.x.toFixed(2)}, ${vec.y.toFixed(2)}, ${vec.z.toFixed(2)}`
-  }
-
-  // Helper function to safely check if a property exists
-  const hasProperty = (obj, prop) => {
-    try {
-      return obj && typeof obj[prop] !== 'undefined'
-    } catch (err) {
-      return false
-    }
-  }
-
-  return (
-    <div
-      className='anodes noscrollbar'
-      css={css`
-        flex: 1;
-        padding: 20px;
-        min-height: 200px;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        .anodes-tree {
-          flex: 1;
-          overflow-y: auto;
-          margin-bottom: 20px;
-          padding-right: 10px;
-        }
-        .anodes-item {
-          display: flex;
-          align-items: center;
-          padding: 4px 6px;
-          border-radius: 10px;
-          font-size: 14px;
-          cursor: pointer;
-          &:hover {
-            color: #00a7ff;
-          }
-          &.selected {
-            color: #00a7ff;
-            background: rgba(0, 167, 255, 0.1);
-          }
-          svg {
-            margin-right: 8px;
-            opacity: 0.5;
-            flex-shrink: 0;
-          }
-          span {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }
-          &-indent {
-            margin-left: 20px;
-          }
-        }
-        .anodes-empty {
-          color: rgba(255, 255, 255, 0.5);
-          text-align: center;
-          padding: 20px;
-        }
-        .anodes-details {
-          flex-shrink: 0;
-          border-top: 1px solid rgba(255, 255, 255, 0.05);
-          padding-top: 20px;
-          max-height: 40vh;
-          overflow-y: auto;
-          padding-right: 10px;
-        }
-        .anodes-detail {
-          display: flex;
-          margin-bottom: 8px;
-          font-size: 14px;
-          &-label {
-            width: 100px;
-            color: rgba(255, 255, 255, 0.5);
-            flex-shrink: 0;
-          }
-          &-value {
-            flex: 1;
-            word-break: break-word;
-            &.copy {
-              cursor: pointer;
-            }
-          }
-        }
-      `}
-    >
-      <div className='anodes-tree'>
-        {rootNode ? (
-          renderHierarchy([rootNode], 0, selectedNode, setSelectedNode)
-        ) : (
-          <div className='anodes-empty'>
-            <LayersIcon size={24} />
-            <div>No nodes found</div>
-          </div>
-        )}
-      </div>
-
-      {selectedNode && (
-        <div className='anodes-details'>
-          <HierarchyDetail label='ID' value={selectedNode.id} copy />
-          <HierarchyDetail label='Name' value={selectedNode.name} />
-
-          {/* Position */}
-          {hasProperty(selectedNode, 'position') && getVectorString(selectedNode.position) && (
-            <HierarchyDetail label='Position' value={getVectorString(selectedNode.position)} />
-          )}
-
-          {/* Rotation */}
-          {hasProperty(selectedNode, 'rotation') && getVectorString(selectedNode.rotation) && (
-            <HierarchyDetail label='Rotation' value={getVectorString(selectedNode.rotation)} />
-          )}
-
-          {/* Scale */}
-          {hasProperty(selectedNode, 'scale') && getVectorString(selectedNode.scale) && (
-            <HierarchyDetail label='Scale' value={getVectorString(selectedNode.scale)} />
-          )}
-
-          {/* Material */}
-          {hasProperty(selectedNode, 'material') && selectedNode.material && (
-            <>
-              <HierarchyDetail label='Material' value={selectedNode.material.type || 'Standard'} />
-              {hasProperty(selectedNode.material, 'color') && selectedNode.material.color && (
-                <HierarchyDetail
-                  label='Color'
-                  value={
-                    selectedNode.material.color.getHexString
-                      ? `#${selectedNode.material.color.getHexString()}`
-                      : 'Unknown'
-                  }
-                />
-              )}
-            </>
-          )}
-
-          {/* Geometry */}
-          {hasProperty(selectedNode, 'geometry') && selectedNode.geometry && (
-            <HierarchyDetail label='Geometry' value={selectedNode.geometry.type || 'Custom'} />
-          )}
-        </div>
-      )}
-    </div>
-  )
+// Helper function to safely get vector string
+const getVectorString = vec => {
+  if (!vec || typeof vec.x !== 'number') return null
+  return `${vec.x.toFixed(2)}, ${vec.y.toFixed(2)}, ${vec.z.toFixed(2)}`
 }
 
-function HierarchyDetail({ label, value, copy }) {
-  let handleCopy = copy ? () => navigator.clipboard.writeText(value) : null
-  return (
-    <div className='anodes-detail'>
-      <div className='anodes-detail-label'>{label}</div>
-      <div className={cls('anodes-detail-value', { copy })} onClick={handleCopy}>
-        {value}
-      </div>
-    </div>
-  )
+// Helper function to safely check if a property exists
+const hasProperty = (obj, prop) => {
+  try {
+    return obj && typeof obj[prop] !== 'undefined'
+  } catch (err) {
+    return false
+  }
 }
 
 const nodeIcons = {
@@ -718,29 +392,24 @@ function renderHierarchy(nodes, depth = 0, selectedNode, setSelectedNode) {
   return nodes.map(node => {
     if (!node) return null
 
-    // Skip the root node but show its children
-    // if (depth === 0 && node.id === '$root') {
-    //   return renderHierarchy(node.children || [], depth, selectedNode, setSelectedNode)
-    // }
-
-    // Safely get children
     const children = node.children || []
     const hasChildren = Array.isArray(children) && children.length > 0
-    const isSelected = selectedNode?.id === node.id
-    const Icon = nodeIcons[node.name] || nodeIcons.default
+    const isSelected = selectedNode?.uuid === node.uuid // Use uuid for selection
+    const Icon = nodeIcons[node.name] || nodeIcons[node.type?.toLowerCase()] || nodeIcons.default
+    const nodeName = node.name || node.type || `Node_${node.uuid?.substring(0, 4)}`
 
     return (
-      <div key={node.id}>
+      <div key={node.uuid || node.id}> {/* Prefer uuid for key */}
         <div
-          className={cls('anodes-item', {
-            'anodes-item-indent': depth > 0,
+          className={cls('nodes-item', {
+            'nodes-item-indent': depth > 0,
             selected: isSelected,
           })}
-          style={{ marginLeft: depth * 20 }}
+          style={{ paddingLeft: depth * 15 + 5 }} // Indentation + base padding
           onClick={() => setSelectedNode(node)}
         >
           <Icon size={14} />
-          <span>{node.id === '$root' ? 'app' : node.id}</span>
+          <span>{nodeName}</span>
         </div>
         {hasChildren && renderHierarchy(children, depth + 1, selectedNode, setSelectedNode)}
       </div>
@@ -748,235 +417,220 @@ function renderHierarchy(nodes, depth = 0, selectedNode, setSelectedNode) {
   })
 }
 
-function PlayerPane({ world, player }) {
-  return <div>PLAYER INSPECT</div>
+function HierarchyDetail({ label, value, copy }) {
+  let handleCopy = copy ? () => navigator.clipboard.writeText(value) : null
+  return (
+    <div className='nodes-detail'>
+      <div className='nodes-detail-label'>{label}</div>
+      <div className={cls('nodes-detail-value', { copy })} onClick={handleCopy}>
+        {value}
+      </div>
+    </div>
+  )
 }
 
-function Fields({ app, blueprint }) {
-  const world = app.world
-  const [fields, setFields] = useState(app.fields)
-  const props = blueprint.props
+export function AppNodesPanel({ app }) {
+  const [selectedNode, setSelectedNode] = useState(null)
+  const rootNode = useMemo(() => app.getNodes ? app.getNodes() : null, [app]) // Get nodes via method
+
+  // Select root node initially if available
   useEffect(() => {
-    app.onFields = setFields
-    return () => {
-      app.onFields = null
+    // Set initial selection to root node if nothing is selected
+    if (rootNode && !selectedNode) {
+      setSelectedNode(rootNode);
     }
-  }, [])
-  const modify = (key, value) => {
-    if (props[key] === value) return
-    props[key] = value
-    // update blueprint locally (also rebuilds apps)
-    const id = blueprint.id
-    const version = blueprint.version + 1
-    world.blueprints.modify({ id, version, props })
-    // broadcast blueprint change to server + other clients
-    world.network.send('blueprintModified', { id, version, props })
-  }
-  return fields.map(field => (
-    <Field key={field.key} world={world} props={props} field={field} value={props[field.key]} modify={modify} />
-  ))
-}
 
-const fieldTypes = {
-  section: FieldSection,
-  text: FieldText,
-  textarea: FieldTextArea,
-  number: FieldNumber,
-  file: FieldFile,
-  switch: FieldSwitch,
-  dropdown: FieldDropdown,
-  range: FieldRange,
-  button: FieldButton,
-  buttons: FieldButtons,
-}
-
-function Field({ world, props, field, value, modify }) {
-  if (field.hidden) {
-    return null
-  }
-  if (field.when && isArray(field.when)) {
-    for (const rule of field.when) {
-      if (rule.op === 'eq' && props[rule.key] !== rule.value) {
-        return null
-      }
+    // Deselect if current selection is no longer valid in the live scene graph
+    if (selectedNode) { 
+        let existsInScene = false;
+        // Check if app, app.root, selectedNode.uuid, and the method exist before calling
+        if (app?.root && selectedNode.uuid && typeof app.root.getObjectByProperty === 'function') { 
+            try {
+              existsInScene = !!app.root.getObjectByProperty('uuid', selectedNode.uuid);
+            } catch (error) {
+               console.error("Error checking node existence in scene:", error);
+               existsInScene = false; // Assume not found on error
+            }
+        }
+        // If the selected node doesn't exist in the current scene graph, 
+        // reset selection to the current root node (or null if rootNode is also gone)
+        if (!existsInScene) {
+            setSelectedNode(rootNode || null); 
+        }
+    } 
+    // If no node is selected, but there's a root node, select the root node.
+    // This handles cases where the selection might have been nullified previously.
+    else if (!selectedNode && rootNode) {
+        setSelectedNode(rootNode);
     }
-  }
-  const FieldControl = fieldTypes[field.type]
-  if (!FieldControl) return null
-  return <FieldControl world={world} field={field} value={value} modify={modify} />
-}
 
-function FieldWithLabel({ label, children }) {
+  }, [rootNode, app, selectedNode]);
+
   return (
     <div
-      className='fieldwlabel'
+      className='app-nodes-panel noscrollbar'
       css={css`
+        height: 100%; 
         display: flex;
-        align-items: center;
-        margin: 0 0 10px;
-        .fieldwlabel-label {
-          width: 90px;
-          font-size: 14px;
-          color: rgba(255, 255, 255, 0.5);
+        flex-direction: column;
+        overflow: hidden; 
+        background-color: #303030; /* Match editor panel background */
+        color: #ddd;
+
+        .nodes-tree-container {
+          flex: 1; /* Takes up available space */
+          overflow-y: auto;
+          padding: 5px;
+          border-bottom: 1px solid #1a1a1a; 
+          min-height: 50px; /* Ensure it's visible */
         }
-        .fieldwlabel-content {
-          flex: 1;
-        }
-      `}
-    >
-      <div className='fieldwlabel-label'>{label}</div>
-      <div className='fieldwlabel-content'>{children}</div>
-    </div>
-  )
-}
-
-function FieldSection({ world, field, value, modify }) {
-  return (
-    <div
-      className='fieldsection'
-      css={css`
-        border-top: 1px solid rgba(255, 255, 255, 0.05);
-        margin: 20px 0 14px;
-        padding: 16px 0 0 0;
-        .fieldsection-label {
-          font-size: 14px;
-          font-weight: 400;
-          line-height: 1;
-        }
-      `}
-    >
-      <div className='fieldsection-label'>{field.label}</div>
-    </div>
-  )
-}
-
-function FieldText({ world, field, value, modify }) {
-  return (
-    <FieldWithLabel label={field.label}>
-      <InputText value={value} onChange={value => modify(field.key, value)} placeholder={field.placeholder} />
-    </FieldWithLabel>
-  )
-}
-
-function FieldTextArea({ world, field, value, modify }) {
-  return (
-    <FieldWithLabel label={field.label}>
-      <InputTextarea value={value} onChange={value => modify(field.key, value)} placeholder={field.placeholder} />
-    </FieldWithLabel>
-  )
-}
-
-function FieldNumber({ world, field, value, modify }) {
-  return (
-    <FieldWithLabel label={field.label}>
-      <InputNumber
-        placeholder={field.placeholder}
-        value={value}
-        onChange={value => modify(field.key, value)}
-        dp={field.dp}
-        min={field.min}
-        max={field.max}
-        step={field.step}
-      />
-    </FieldWithLabel>
-  )
-}
-
-function FieldRange({ world, field, value, modify }) {
-  return (
-    <FieldWithLabel label={field.label}>
-      <InputRange
-        value={value}
-        onChange={value => modify(field.key, value)}
-        min={field.min}
-        max={field.max}
-        step={field.step}
-      />
-    </FieldWithLabel>
-  )
-}
-
-function FieldFile({ world, field, value, modify }) {
-  const kind = fileKinds[field.kind]
-  if (!kind) return null
-  return (
-    <FieldWithLabel label={field.label}>
-      <InputFile world={world} kind={field.kind} value={value} onChange={value => modify(field.key, value)} />
-    </FieldWithLabel>
-  )
-}
-
-function FieldSwitch({ world, field, value, modify }) {
-  return (
-    <FieldWithLabel label={field.label}>
-      <InputSwitch options={field.options} value={value} onChange={value => modify(field.key, value)} />
-    </FieldWithLabel>
-  )
-}
-
-function FieldDropdown({ world, field, value, modify }) {
-  return (
-    <FieldWithLabel label={field.label}>
-      <InputDropdown options={field.options} value={value} onChange={value => modify(field.key, value)} />
-    </FieldWithLabel>
-  )
-}
-
-function FieldButton({ world, field, value, modify }) {
-  return (
-    <FieldWithLabel label={''}>
-      <div
-        css={css`
-          background: #252630;
-          border-radius: 10px;
-          height: 34px;
+        
+        .nodes-item {
           display: flex;
           align-items: center;
-          justify-content: center;
-          font-size: 14px;
+          padding: 3px 5px; /* Reduced padding */
+          border-radius: 3px;
+          font-size: 11px; /* Smaller font */
+          cursor: pointer;
+          white-space: nowrap;
           &:hover {
-            cursor: pointer;
-            background: #30323e;
+            background-color: #3c3c3c;
           }
-        `}
-        onClick={field.onClick}
-      >
-        <span>{field.label}</span>
+          &.selected {
+            color: white;
+            background: #4f87ff; /* Selection color */
+          }
+          svg {
+            margin-right: 5px;
+            opacity: 0.7;
+            flex-shrink: 0;
+          }
+          span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          /* Indentation handled by inline style */
+        }
+        
+        .nodes-empty {
+          color: #888;
+          text-align: center;
+          padding: 10px;
+          font-size: 11px;
+        }
+        
+        .nodes-details-container {
+          flex-shrink: 0;
+          padding: 10px;
+          max-height: 50%; /* Limit details height */
+          overflow-y: auto;
+        }
+        
+        .nodes-detail {
+          display: flex;
+          margin-bottom: 5px;
+          font-size: 11px;
+          &-label {
+            width: 70px;
+            color: #aaa;
+            flex-shrink: 0;
+          }
+          &-value {
+            flex: 1;
+            word-break: break-word;
+            color: #ccc;
+            &.copy {
+              cursor: pointer;
+            }
+            &:hover {
+               &.copy { color: #fff; }
+            }
+          }
+        }
+      `}
+    >
+      <div className='nodes-tree-container'>
+        {rootNode ? (
+          renderHierarchy([rootNode], 0, selectedNode, setSelectedNode)
+        ) : (
+          <div className='nodes-empty'>
+            <LayersIcon size={16} />
+            <div>No nodes found or model not loaded.</div>
+          </div>
+        )}
       </div>
-    </FieldWithLabel>
+
+      {selectedNode && (
+        <div className='nodes-details-container'>
+          <HierarchyDetail label='UUID' value={selectedNode.uuid} copy />
+          <HierarchyDetail label='Name' value={selectedNode.name || '(No Name)'} />
+          <HierarchyDetail label='Type' value={selectedNode.type || 'Object3D'} />
+
+          {/* Position */} 
+          {hasProperty(selectedNode, 'position') && getVectorString(selectedNode.position) && (
+            <HierarchyDetail label='Position' value={getVectorString(selectedNode.position)} />
+          )}
+
+          {/* Rotation */}
+          {hasProperty(selectedNode, 'rotation') && (
+            <HierarchyDetail label='Rotation' value={`X: ${selectedNode.rotation.x.toFixed(2)}, Y: ${selectedNode.rotation.y.toFixed(2)}, Z: ${selectedNode.rotation.z.toFixed(2)}`} />
+          )}
+
+          {/* Scale */} 
+          {hasProperty(selectedNode, 'scale') && getVectorString(selectedNode.scale) && (
+            <HierarchyDetail label='Scale' value={getVectorString(selectedNode.scale)} />
+          )}
+          
+          {/* Visibility */}
+          {hasProperty(selectedNode, 'visible') && (
+             <HierarchyDetail label='Visible' value={selectedNode.visible ? 'Yes' : 'No'} />
+          )}
+
+          {/* Material */} 
+          {hasProperty(selectedNode, 'material') && selectedNode.material && (
+            <>
+              <HierarchyDetail label='Material' value={selectedNode.material.name || selectedNode.material.type || 'Standard'} />
+              {hasProperty(selectedNode.material, 'color') && selectedNode.material.color && (
+                <HierarchyDetail
+                  label='Color'
+                  value={
+                    selectedNode.material.color.getHexString
+                      ? `#${selectedNode.material.color.getHexString()}`
+                      : '(Color object)'
+                  }
+                />
+              )}
+              {hasProperty(selectedNode.material, 'map') && selectedNode.material.map && (
+                 <HierarchyDetail label='Texture' value={selectedNode.material.map.name || '(Texture object)'} />
+              )}
+            </>
+          )}
+
+          {/* Geometry */} 
+          {hasProperty(selectedNode, 'geometry') && selectedNode.geometry && (
+             <HierarchyDetail label='Geometry' value={selectedNode.geometry.type || 'Custom'} />
+          )}
+          
+           {/* User Data */} 
+          {hasProperty(selectedNode, 'userData') && Object.keys(selectedNode.userData).length > 0 && (
+            <>
+              <HierarchyDetail label='User Data' value={JSON.stringify(selectedNode.userData)} />
+            </>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
-function FieldButtons({ world, field, value, modify }) {
-  return (
-    <FieldWithLabel label={field.label}>
-      <div
-        css={css`
-          height: 34px;
-          display: flex;
-          gap: 5px;
-          .fieldbuttons-button {
-            flex: 1;
-            background: #252630;
-            border-radius: 10px;
-            height: 34px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-            &:hover {
-              cursor: pointer;
-              background: #30323e;
-            }
-          }
-        `}
-      >
-        {field.buttons.map(button => (
-          <div key={button.label} className='fieldbuttons-button' onClick={button.onClick}>
-            <span>{button.label}</span>
-          </div>
-        ))}
-      </div>
-    </FieldWithLabel>
-  )
-}
+
+// --- Deprecated AppPane --- 
+/* 
+export function AppPane({ world, app, onClose }) { ... } 
+function AppPaneMain({ world, app, blueprint, canEdit }) { ... }
+function AppPaneMeta({ world, app, blueprint }) { ... }
+function AppPaneNodes({ app }) { ... }
+*/
+
+// --- Deprecated PlayerPane --- 
+// function PlayerPane({ world, player }) { ... }

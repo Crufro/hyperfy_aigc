@@ -3,13 +3,43 @@ import React from 'react';
 import { PanelHeader } from './PanelHeader'; // Assuming PanelHeader is extracted
 import { CrosshairIcon } from 'lucide-react'; // Import the icon
 
-export function HierarchyPanel({ apps, world, selectedApp, setSelectedApp, width, onClose }) {
+export function HierarchyPanel({ apps, world, selectedApp, onAppSelect, onDeleteApp, onShowContextMenu, width, onClose }) {
   const handleFindApp = (e, app) => {
     e.stopPropagation(); // Prevent selection when clicking the icon
     if (world && world.target && app.root) {
       world.target.show(app.root.position);
     } else {
       console.warn('Could not find app or target system:', app);
+    }
+  };
+
+  const handleContextMenu = (e, app) => {
+    e.preventDefault(); // Prevent default context menu
+    e.stopPropagation(); // Prevent selection/other clicks
+
+    if (onShowContextMenu) {
+      // Define menu items for the app context menu
+      const menuItems = [
+        {
+          label: `Delete '${app.blueprint?.name || app.name || `App ${app.data?.id}`}'`,
+          action: () => {
+            // Directly tell the EditorUI to delete *this specific* app
+            // Pass the specific app to the delete handler
+            if (onDeleteApp) {
+              onDeleteApp(app); 
+            }
+          },
+          // Optionally disable if needed, e.g., for protected apps
+          // disabled: app.isProtected,
+        },
+        { isSeparator: true }, // Example separator
+        { label: 'Rename...', action: () => alert('Rename action...'), disabled: true },
+        { label: 'Duplicate', action: () => alert('Duplicate action...'), disabled: true },
+      ];
+
+      onShowContextMenu(e.clientX, e.clientY, menuItems);
+    } else {
+      console.warn('onShowContextMenu function not provided to HierarchyPanel');
     }
   };
 
@@ -41,7 +71,9 @@ export function HierarchyPanel({ apps, world, selectedApp, setSelectedApp, width
           apps.map(app => (
             <div 
               key={app.data?.id || Math.random()} // Use instance ID as key, fallback if needed
-              onClick={() => setSelectedApp(app)} // Set selected app on click
+              onClick={() => onAppSelect(app)} // Use the new handler
+              onContextMenu={(e) => handleContextMenu(e, app)} // Updated context menu handler
+              title={`Right-click for options on ${app.blueprint?.name || app.name}`}
               css={css`
                 display: flex; /* Use flexbox for layout */
                 align-items: center; /* Vertically center items */

@@ -1,5 +1,6 @@
 import { css } from '@firebolt-dev/css';
-import React from 'react'; // Assuming React is used, adjust if necessary
+import React, { useRef, useEffect } from 'react'; // Assuming React is used, adjust if necessary
+import { ChevronDown, GripVertical } from 'lucide-react';
 
 // Helper components (extracted from EditorUI)
 const MenuDropdown = ({ title, items }) => (
@@ -23,15 +24,16 @@ const MenuDropdown = ({ title, items }) => (
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            if (item.action) item.action();
+            if (item.action && !item.disabled) item.action();
           }}
           css={css`
             padding: 6px 10px;
-            cursor: pointer;
+            cursor: ${item.disabled ? 'not-allowed' : 'pointer'};
             display: flex;
             align-items: center;
             justify-content: space-between;
-            &:hover { background-color: #4b4b4b; }
+            ${!item.disabled ? '&:hover { background-color: #4b4b4b; }' : ''}
+            opacity: ${item.disabled ? 0.5 : 1};
           `}
         >
           <div css={css`display: flex; align-items: center;`}>
@@ -66,8 +68,28 @@ export function EditorMenuBar({
   activeMenu,
   menuOpen,
   handleMenuClick,
-  setMenuOpen // Pass setMenuOpen directly
+  setMenuOpen,
+  selectedApp,
+  onDeleteSelectedApp,
+  onUndo,
 }) {
+  const menuRef = useRef(null);
+
+  // Close menu if clicking outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setMenuOpen(false);
+        // Optionally reset activeMenu here if desired: setActiveMenu(null); 
+      }
+    }
+    // Bind the event listener
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      // Unbind the event listener on clean up
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [menuRef, setMenuOpen]);
 
   // Menu items configuration (extracted from EditorUI)
   const fileMenuItems = [
@@ -78,19 +100,35 @@ export function EditorMenuBar({
   ];
 
   const editMenuItems = [
-    { label: 'Undo', shortcut: 'Ctrl+Z', action: () => setMenuOpen(false) },
+    { label: 'Undo', shortcut: 'Ctrl+Z', 
+      action: () => { 
+        if (onUndo) onUndo();
+        setMenuOpen(false);
+      }
+    },
     { label: 'Redo', shortcut: 'Ctrl+Y', action: () => setMenuOpen(false) },
+    { label: 'Delete Selected', shortcut: 'Del', 
+      action: () => { 
+         if (onDeleteSelectedApp && selectedApp) {
+            onDeleteSelectedApp();
+          } 
+          setMenuOpen(false); 
+      }, 
+      disabled: !selectedApp
+    },
     { label: 'Cut', shortcut: 'Ctrl+X', action: () => setMenuOpen(false) },
     { label: 'Copy', shortcut: 'Ctrl+C', action: () => setMenuOpen(false) },
     { label: 'Paste', shortcut: 'Ctrl+V', action: () => setMenuOpen(false) },
   ];
 
   const windowMenuItems = [
-    { label: 'Hierarchy', action: () => { togglePanel('hierarchy'); setMenuOpen(false); }, checked: layout.hierarchy.visible },
-    { label: 'Inspector', action: () => { togglePanel('inspector'); setMenuOpen(false); }, checked: layout.inspector.visible },
-    { label: 'Project', action: () => { togglePanel('project'); setMenuOpen(false); }, checked: layout.project.visible },
-    { label: 'Console', action: () => { togglePanel('console'); setMenuOpen(false); }, checked: layout.console.visible },
-    { label: 'Code', action: () => { togglePanel('code'); setMenuOpen(false); }, checked: layout.code.visible },
+    { label: 'Hierarchy', action: () => { togglePanel('hierarchy'); setMenuOpen(false); }, checked: layout.hierarchy?.visible },
+    { label: 'Inspector', action: () => { togglePanel('inspector'); setMenuOpen(false); }, checked: layout.inspector?.visible },
+    { label: 'App', action: () => { togglePanel('appMain'); setMenuOpen(false); }, checked: layout.appMain?.visible },
+    { label: 'Meta', action: () => { togglePanel('appMeta'); setMenuOpen(false); }, checked: layout.appMeta?.visible },
+    { label: 'Nodes', action: () => { togglePanel('appNodes'); setMenuOpen(false); }, checked: layout.appNodes?.visible },
+    { label: 'Console', action: () => { togglePanel('console'); setMenuOpen(false); }, checked: layout.console?.visible },
+    { label: 'Code', action: () => { togglePanel('code'); setMenuOpen(false); }, checked: layout.code?.visible },
     { label: 'Reset Layout', action: () => { resetLayout(); setMenuOpen(false); } },
   ];
 

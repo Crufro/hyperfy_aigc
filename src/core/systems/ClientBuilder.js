@@ -295,14 +295,7 @@ export class ClientBuilder extends System {
     // destroy
     if (this.control.keyX.pressed) {
       const entity = this.selected || this.getEntityAtReticle()
-      if (entity?.isApp && !entity.data.pinned) {
-        this.select(null)
-        this.addUndo({
-          name: 'add-entity',
-          data: cloneDeep(entity.data),
-        })
-        entity?.destroy(true)
-      }
+      this.destroyEntityById(entity?.data?.id)
     }
     // undo
     if (
@@ -952,6 +945,32 @@ export class ClientBuilder extends System {
       quaternion = [0, 0, 0, 1]
     }
     return { position, quaternion }
+  }
+
+  // Method to destroy the currently selected entity
+  destroySelected() {
+    this.destroyEntityById(this.selected?.data?.id);
+  }
+
+  // New method to destroy an entity by ID, adding undo action
+  destroyEntityById(entityId) {
+    if (!entityId) return; // Do nothing if no ID provided
+
+    const entity = this.world.entities.get(entityId);
+
+    if (entity?.isApp && !entity.data.pinned) {
+      // If this entity is currently selected in the builder, deselect it first
+      if (this.selected === entity) {
+        this.select(null);
+      }
+
+      this.addUndo({
+        name: 'add-entity',
+        data: cloneDeep(entity.data),
+      });
+
+      entity.destroy(true); // Destroy the entity
+    }
   }
 }
 

@@ -1,15 +1,17 @@
 import { css } from '@firebolt-dev/css'
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { ResizableBox } from 'react-resizable'
 import { EditorMenuBar } from './EditorMenuBar'
 import { EditorToolbar } from './EditorToolbar'
 import { HierarchyPanel } from './HierarchyPanel'
 import { InspectorPanel } from './InspectorPanel'
-import { ProjectPanel } from './ProjectPanel'
 import { ConsolePanel } from './ConsolePanel'
 import { ViewportPanel } from './ViewportPanel'
 import { PanelHeader } from './PanelHeader'
 import { CodePanel } from './CodePanel'
+import { AppMainPanel, AppMetaPanel, AppNodesPanel } from './InspectPane'
+import { cls } from './cls'
+import { ContextMenu } from './ContextMenu'
 
 // CSS for react-resizable handles 
 const resizableStyles = css`
@@ -51,43 +53,125 @@ const resizableStyles = css`
 // Panel configuration defaults
 const DEFAULT_LAYOUT = {
   hierarchy: { visible: true, width: 250 },
-  inspector: { visible: true, width: 300 },
-  project: { visible: true, height: 200 },
-  console: { visible: false, height: 150 },
-  code: { visible: false, height: 200 }
+  inspector: { visible: true, height: 250 },
+  console: { visible: true, height: 200 },
+  code: { visible: true, height: 300 },
+  appMain: { visible: true },
+  appMeta: { visible: true },
+  appNodes: { visible: true },
+  bottomCenterHeight: 250,
+};
+
+// Simple Tabbed Container Component
+const TabbedPanelContainer = ({ world, app, layout, panels, activeTab, setActiveTab, height, onCloseTab }) => {
+  if (!app) {
+    return <div css={css`padding: 10px; color: #888; font-size: 11px; height: 100%; display: flex; align-items: center; justify-content: center; background-color: #303030;`}>Select an App in the Hierarchy.</div>;
+  }
+
+  return (
+    <div css={css`height: 100%; display: flex; flex-direction: column; background-color: #303030;`}>
+      {/* Tab Headers */}
+      <div css={css`
+          display: flex; 
+          flex-shrink: 0; 
+          border-bottom: 1px solid #1a1a1a; 
+          background-color: #252525;
+          height: 28px; /* Tab header height */
+      `}>
+        {panels.map(panel => (
+           layout[panel.key]?.visible && (
+              <div 
+                key={panel.key}
+                className={cls('tab-item', { active: activeTab === panel.key })}
+                onClick={() => setActiveTab(panel.key)}
+                css={css`
+                  padding: 0 10px;
+                  font-size: 11px;
+                  display: flex;
+                  align-items: center;
+                  cursor: pointer;
+                  color: #aaa;
+                  border-right: 1px solid #1a1a1a;
+                  position: relative;
+                  &:hover { background-color: #3c3c3c; color: #eee; }
+                  &.active {
+                    background-color: #303030; /* Matches content bg */
+                    color: #eee;
+                    /* Maybe add a bottom border highlight */
+                    /* border-bottom: 2px solid #eee; */ 
+                    /* margin-bottom: -1px; */
+                  }
+                `}
+              >
+                {panel.title}
+                {/* Optional: Add close button per tab? 
+                <button onClick={(e) => { e.stopPropagation(); onCloseTab(panel.key); }} css={css`...`}>x</button> 
+                */} 
+              </div>
+            )
+        ))}
+      </div>
+      {/* Tab Content */}
+      <div css={css`flex: 1; min-height: 0; overflow: hidden;`}>
+        {panels.map(panel => (
+          layout[panel.key]?.visible && activeTab === panel.key && (
+            <panel.component 
+              key={panel.key} 
+              world={world} 
+              app={app} 
+              /* Pass other necessary props? */
+            />
+          )
+        ))}
+      </div>
+    </div>
+  );
 };
 
 export function EditorUI({ world }) {
   const [editorMode, setEditorMode] = useState(false)
   const [currentMode, setCurrentMode] = useState('grab')
-  const [selectedApp, setSelectedApp] = useState(null); // State for selected app
-  
-  // State for layout and panels
+  const [selectedApp, setSelectedApp] = useState(null);
   const [layout, setLayout] = useState(() => {
-    let initialState = { ...DEFAULT_LAYOUT }; // Start with a copy of defaults
+    let initialState = { ...DEFAULT_LAYOUT }; 
     try {
       const savedLayoutString = localStorage.getItem('editor-layout');
       if (savedLayoutString) {
         const parsedLayout = JSON.parse(savedLayoutString);
-        // Ensure all panels from DEFAULT_LAYOUT exist, merging saved data
+        // Merge saved state, ensuring all DEFAULT keys exist
         Object.keys(DEFAULT_LAYOUT).forEach(panelKey => {
-          if (parsedLayout[panelKey]) {
-            // Merge saved panel config onto default panel config
-            initialState[panelKey] = { 
-              ...DEFAULT_LAYOUT[panelKey], 
-              ...parsedLayout[panelKey] 
-            };
-          }
-          // If parsedLayout doesn't have the panelKey, initialState keeps the default
+           initialState[panelKey] = { 
+             ...DEFAULT_LAYOUT[panelKey], // Start with default 
+             ...(parsedLayout[panelKey] || {}) // Merge saved config if exists
+           };
         });
+         // Also merge top-level properties like bottomCenterHeight
+        if (typeof parsedLayout.bottomCenterHeight === 'number') {
+           initialState.bottomCenterHeight = parsedLayout.bottomCenterHeight;
+        }
+      } else {
+         // If no saved layout, ensure all default keys are present
+         initialState = { ...DEFAULT_LAYOUT };
       }
     } catch (e) {
       console.error("Error loading or parsing layout from localStorage:", e);
-      // Fallback to default if error occurs during loading/parsing
       initialState = { ...DEFAULT_LAYOUT }; 
     }
+    // Ensure visibility flags exist for app panels if loaded from old state
+    initialState.appMain = { visible: initialState.appMain?.visible ?? DEFAULT_LAYOUT.appMain.visible };
+    initialState.appMeta = { visible: initialState.appMeta?.visible ?? DEFAULT_LAYOUT.appMeta.visible };
+    initialState.appNodes = { visible: initialState.appNodes?.visible ?? DEFAULT_LAYOUT.appNodes.visible };
+    // Ensure project is hidden even if loaded from old state
+    // initialState.project = { visible: false };
     return initialState;
   });
+  
+  // State for the active tab in the bottom-center area
+  const [bottomCenterActiveTab, setBottomCenterActiveTab] = useState('appMain');
+  
+  // State for context menu
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, items: [] });
+  
   const [activeMenu, setActiveMenu] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
   
@@ -97,24 +181,127 @@ export function EditorUI({ world }) {
   const bottomResizeRef = useRef(null)
   const editorUIRef = useRef(null)
 
-  // Derive apps list from world entities
-  const apps = useMemo(() => {
-    if (!world?.entities?.items) return [];
-    const appEntities = [];
+  // State for the list of apps
+  const [apps, setApps] = useState([]);
+
+  // Effect to initialize and update apps list based on world events
+  useEffect(() => {
+    if (!world?.entities?.items) return;
+
+    // Initial population
+    const initialApps = [];
     for (const [_, entity] of world.entities.items) {
       if (entity.isApp) {
-        appEntities.push(entity);
+        initialApps.push(entity);
       }
     }
-    // Potential future sorting/filtering could happen here
-    return appEntities;
-  }, [world?.entities?.items, editorMode]); // Recompute if entities or editorMode change
+    setApps(initialApps);
+
+    // Event handlers
+    const handleEntityAdded = (entity) => {
+       console.log('Entity Added Event:', entity);
+       if (entity?.isApp) {
+          setApps(prevApps => [...prevApps, entity]);
+       }
+    };
+
+    const handleEntityRemoved = (entity) => {
+       console.log('Entity Removed Event:', entity);
+       // Note: The event emits the entity object *before* full destruction.
+       // We use its ID to filter.
+       if (entity?.isApp) {
+          setApps(prevApps => prevApps.filter(app => app.data.id !== entity.data.id));
+          // If the removed app was selected, deselect it
+          if (selectedApp && selectedApp.data.id === entity.data.id) {
+              setSelectedApp(null);
+          }
+       }
+    };
+
+    // Subscribe
+    world.events.on('entityAdded', handleEntityAdded);
+    world.events.on('entityRemoved', handleEntityRemoved);
+
+    // Cleanup
+    return () => {
+      world.events.off('entityAdded', handleEntityAdded);
+      world.events.off('entityRemoved', handleEntityRemoved);
+    };
+
+  }, [world, world?.entities, world?.events, selectedApp]); // Depend on world and its systems
+
+  // Function to handle selecting an app from ANY source (UI or Builder)
+  // Ensures both UI state and Builder state are synchronized
+  const handleAppSelection = (app) => {
+    // Update UI state
+    setSelectedApp(app);
+    // Update Builder state
+    if (world.builder) {
+       // Call builder's select method, which handles mover logic, gizmos, etc.
+       world.builder.select(app); 
+    }
+  };
+
+  // Function to delete the selected app (now uses builder's selection)
+  // Updated: Accepts optional appToDelete for explicit deletion
+  const handleDeleteSelectedApp = (appToDelete = null) => {
+    if (world.builder) {
+      if (appToDelete) {
+        // If an app is passed directly (e.g., from context menu), use its ID
+        console.log('Requesting builder delete specific app:', appToDelete.data?.id);
+        world.builder.destroyEntityById(appToDelete.data?.id);
+        // Also update UI state if the deleted app was the selected one
+        if (selectedApp === appToDelete) {
+          setSelectedApp(null);
+        }
+      } else if (selectedApp) {
+        // If no specific app passed (e.g., from main menu), use the current UI selection's ID
+        console.log('Requesting builder delete selected app:', selectedApp.data?.id);
+        world.builder.destroyEntityById(selectedApp.data?.id);
+        setSelectedApp(null); // Clear UI selection
+      } else {
+        // Fallback: If no specific app and no UI selection, try builder's internal selection (might do nothing)
+        console.log('Requesting builder delete its current selection (fallback)');
+        world.builder.destroySelected(); 
+      }
+    } 
+  };
+
+  // Placeholder function for Undo
+  const handleUndo = () => {
+    console.log("Attempting Undo via world.builder.undo()");
+    if (world.builder) {
+      world.builder.undo();
+    }
+    // In a real implementation, this would trigger the undo logic.
+  };
+
+  // Function to show the context menu
+  const showContextMenu = (x, y, items) => {
+    setContextMenu({ visible: true, x, y, items });
+  };
+
+  // Function to hide the context menu
+  const hideContextMenu = () => {
+    setContextMenu(prev => ({ ...prev, visible: false }));
+  };
 
   // Save layout to localStorage when it changes
   useEffect(() => {
     if (layout) {
       try {
-        localStorage.setItem('editor-layout', JSON.stringify(layout));
+        // Only save relevant layout parts, not the whole object potentially
+        const layoutToSave = {
+           hierarchy: layout.hierarchy,
+           inspector: layout.inspector,
+           console: layout.console,
+           code: layout.code,
+           appMain: layout.appMain,
+           appMeta: layout.appMeta,
+           appNodes: layout.appNodes,
+           bottomCenterHeight: layout.bottomCenterHeight,
+        }
+        localStorage.setItem('editor-layout', JSON.stringify(layoutToSave));
       } catch (e) {
         console.error("Error saving layout to localStorage:", e);
       }
@@ -124,24 +311,44 @@ export function EditorUI({ world }) {
   useEffect(() => {
     const onEditorMode = (enabled) => {
       setEditorMode(enabled)
-      
-      // Unlock cursor when entering editor mode
       if (enabled && world.input) {
         world.input.setCursorLock(false);
       }
     }
-    
-    // Listen for editor-mode events
     world.on('editor-mode', onEditorMode)
-    
     return () => {
       world.off('editor-mode', onEditorMode)
     }
   }, [world])
 
-  // Reset layout function
+  // Add keydown listener for Delete key
+  useEffect(() => {
+    if (!editorMode) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Delete' && selectedApp) {
+        handleDeleteSelectedApp();
+      }
+      // Handle Escape key for menus (existing logic)
+      if (e.key === 'Escape') {
+        if (world.input) {
+          world.input.setCursorLock(false);
+        }
+        setMenuOpen(false);
+        setActiveMenu(null);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+    // Include selectedApp in dependencies to re-bind if selection changes (though listener logic depends on it)
+    // Add world.builder dependency since we now call methods on it
+  }, [editorMode, world, selectedApp, handleDeleteSelectedApp]); // Add handleDeleteSelectedApp dependency
+
+  // Reset layout function - update to include new defaults
   const resetLayout = () => {
     setLayout(DEFAULT_LAYOUT);
+    setBottomCenterActiveTab('appMain'); // Reset tab
     setMenuOpen(false);
     setActiveMenu(null);
     try {
@@ -151,15 +358,22 @@ export function EditorUI({ world }) {
     }
   };
 
-  // Toggle panel visibility
+  // Toggle panel visibility - handles new panels
   const togglePanel = (panelName) => {
     setLayout(prev => ({
       ...prev,
       [panelName]: {
-        ...prev[panelName],
-        visible: !prev[panelName].visible
+        ...(prev[panelName] || {}), // Handle potentially missing key briefly
+        visible: !prev[panelName]?.visible
       }
     }));
+    // If hiding the active tab, switch to another visible one if possible
+    if (panelName === bottomCenterActiveTab && !layout[panelName]?.visible) {
+        const availableTabs = ['appMain', 'appMeta', 'appNodes', 'console'].filter(key => layout[key]?.visible);
+        if (availableTabs.length > 0) {
+           setBottomCenterActiveTab(availableTabs[0]);
+        }
+    }
     setMenuOpen(false);
   };
 
@@ -169,28 +383,6 @@ export function EditorUI({ world }) {
       world.builder.setMode(currentMode)
     }
   }, [currentMode, editorMode, world.builder])
-
-  // Add ESC key listener to unlock cursor
-  useEffect(() => {
-    if (!editorMode) return;
-    
-    function onKeyDown(e) {
-      if (e.key === 'Escape') {
-        if (world.input) {
-          world.input.setCursorLock(false);
-        }
-        // Close any open menus on ESC
-        setMenuOpen(false);
-        setActiveMenu(null);
-      }
-    }
-    
-    document.addEventListener('keydown', onKeyDown);
-    
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [editorMode, world]);
 
   // Toggle menu open/closed
   const handleMenuClick = (menuName) => {
@@ -204,17 +396,34 @@ export function EditorUI({ world }) {
 
   // Update layout state from ResizableBox
   const handleResize = (panelName, sizeProp) => (event, { size }) => {
-    setLayout(prev => ({
-      ...prev,
-      [panelName]: {
-        ...prev[panelName],
-        [sizeProp]: size[sizeProp] // Update width or height based on sizeProp
-      }
-    }));
+     // Special handling for the shared bottom-center height
+     if (panelName === 'bottomCenter') {
+         setLayout(prev => ({
+            ...prev,
+            bottomCenterHeight: size.height
+         }));
+     } else {
+        // Standard panel resize
+        setLayout(prev => ({
+          ...prev,
+          [panelName]: {
+            ...prev[panelName],
+            [sizeProp]: size[sizeProp] // Update width or height based on sizeProp
+          }
+        }));
+     }
   };
+  
+  // Define panels for the bottom-center tabbed container
+  const bottomCenterPanels = [
+     { key: 'appMain', title: 'App', component: AppMainPanel },
+     { key: 'appMeta', title: 'Meta', component: AppMetaPanel },
+     { key: 'appNodes', title: 'Nodes', component: AppNodesPanel },
+     { key: 'console', title: 'Console', component: ConsolePanel },
+  ];
 
   if (!editorMode) {
-    return null // Don't show Unity UI in play mode
+    return null
   }
 
   return (
@@ -222,7 +431,7 @@ export function EditorUI({ world }) {
       ref={editorUIRef}
       className="editor-ui"
       css={css`
-        ${resizableStyles} /* Apply updated styles */
+        ${resizableStyles} 
         position: absolute;
         top: 0;
         left: 0;
@@ -237,20 +446,10 @@ export function EditorUI({ world }) {
         z-index: 1000;
         pointer-events: auto;
         
-        /* Ensure parent containers allow overflow for centered handles */
-        .main-content,
-        .center-area,
-        .react-resizable-box { 
-          overflow: visible !important; /* Allow handles to sit outside box bounds */
-        }
-
-         /* Add relative positioning to ResizableBox parent if needed for absolute handles */
-        .react-resizable {
-          position: relative !important; /* Needed for absolute positioning of handles */
-        }
+        .main-content, .center-area, .react-resizable-box { overflow: visible !important; }
+        .react-resizable { position: relative !important; }
       `}
     >
-      {/* Top Menu Bar */}
       <EditorMenuBar
         layout={layout}
         togglePanel={togglePanel}
@@ -259,9 +458,10 @@ export function EditorUI({ world }) {
         menuOpen={menuOpen}
         handleMenuClick={handleMenuClick}
         setMenuOpen={setMenuOpen}
+        selectedApp={selectedApp}
+        onDeleteSelectedApp={handleDeleteSelectedApp}
+        onUndo={handleUndo}
       />
-
-      {/* Toolbar - Replaced with component */}
       <EditorToolbar />
 
       {/* Main Content */}
@@ -274,32 +474,58 @@ export function EditorUI({ world }) {
           overflow: hidden;
         `}
       >
-        {/* Left Panel (Hierarchy) */}
-        {layout.hierarchy.visible && (
-          <ResizableBox
-            width={layout.hierarchy.width}
-            height={Infinity} // Let height be determined by flex parent
-            axis="x"
-            resizeHandles={['e']} // East handle
-            minConstraints={[100, Infinity]} // Min width 100
-            maxConstraints={[600, Infinity]} // Max width 600
-            onResize={handleResize('hierarchy', 'width')}
-            css={css`flex-shrink: 0; display: flex !important;`} // Ensure flex behavior
-          >
-            <div style={{width: '100%', height: '100%', display: 'flex', flexDirection: 'column'}}>
+        {/* Left Column (Hierarchy & Inspector) */}
+        <ResizableBox
+          width={layout.hierarchy.width}
+          height={Infinity}
+          axis="x"
+          resizeHandles={['e']}
+          minConstraints={[150, Infinity]}
+          maxConstraints={[600, Infinity]}
+          onResize={handleResize('hierarchy', 'width')}
+          css={css`flex-shrink: 0; display: flex !important; flex-direction: column;`}
+        >
+          {/* Top Left: Hierarchy */}
+          {layout.hierarchy?.visible && (
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
               <HierarchyPanel
-                apps={apps} // Pass apps list as prop
-                world={world} // Pass world object as prop
-                selectedApp={selectedApp} // Pass selected app state
-                setSelectedApp={setSelectedApp} // Pass setter function
-                width={layout.hierarchy.width}
+                apps={apps}
+                world={world}
+                selectedApp={selectedApp}
+                onAppSelect={handleAppSelection}
+                onDeleteApp={handleDeleteSelectedApp}
+                onShowContextMenu={showContextMenu}
                 onClose={() => togglePanel('hierarchy')}
               />
             </div>
-          </ResizableBox>
-        )}
+          )}
+          {/* Bottom Left: Inspector */}
+          {layout.hierarchy?.visible && layout.inspector?.visible && (
+            <div css={css`height: 1px; background-color: #1a1a1a; flex-shrink: 0;`}></div>
+          )}
+          {layout.inspector?.visible && (
+            <ResizableBox
+              width={Infinity}
+              height={layout.inspector.height}
+              axis="y"
+              resizeHandles={['n']}
+              minConstraints={[Infinity, 100]}
+              maxConstraints={[Infinity, 600]}
+              onResize={handleResize('inspector', 'height')}
+              css={css`flex-shrink: 0; display: flex !important;`}
+            >
+              <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <InspectorPanel
+                  selectedApp={selectedApp}
+                  world={world}
+                  onClose={() => togglePanel('inspector')}
+                />
+              </div>
+            </ResizableBox>
+          )}
+        </ResizableBox>
 
-        {/* Center Area (Viewport and Bottom Panel) */}
+        {/* Center Area (Viewport and Bottom Tabbed Panels) */}
         <div 
           className="center-area"
           css={css`
@@ -307,9 +533,12 @@ export function EditorUI({ world }) {
             display: flex;
             flex-direction: column;
             min-width: 0;
-              overflow: hidden;
-            `}
-          >
+            overflow: hidden;
+            border-left: 1px solid #1a1a1a;
+            border-right: 1px solid #1a1a1a;
+          `}
+        >
+          {/* Top Center: Viewport */}
           <ViewportPanel 
             world={world} 
             editorMode={editorMode}
@@ -317,105 +546,62 @@ export function EditorUI({ world }) {
             togglePanel={togglePanel} 
           />
 
-          {(layout.project.visible || layout.console.visible) && (
+          {/* Bottom Center: Tabbed Panels (App/Meta/Nodes/Console) */}
+          {(layout.appMain?.visible || layout.appMeta?.visible || layout.appNodes?.visible || layout.console?.visible) && (
              <ResizableBox
-               height={layout.project.visible ? layout.project.height : layout.console.height} // Use height of visible panel
-               width={Infinity} // Let width be determined by flex parent
-               axis="y" 
-               resizeHandles={['n']} // North handle
-               minConstraints={[Infinity, 50]}  // Min height 50
-               maxConstraints={[Infinity, 500]} // Max height 500
-               onResize={handleResize(layout.project.visible ? 'project' : 'console', 'height')} // Update correct panel's height
-               css={css`flex-shrink: 0; display: flex !important; flex-direction: column;`} // Ensure flex behavior
+               height={layout.bottomCenterHeight}
+               width={Infinity}
+               axis="y"
+               resizeHandles={['n']}
+               minConstraints={[Infinity, 50]}
+               maxConstraints={[Infinity, 800]}
+               onResize={handleResize('bottomCenter', 'height')}
+               css={css`flex-shrink: 0; display: flex !important; flex-direction: column; border-top: 1px solid #1a1a1a;`}
              >
-              <div style={{width: '100%', height: '100%', display: 'flex', flexDirection: 'column'}}>
-                {layout.project.visible && (
-                  <ProjectPanel 
-                    height={layout.project.height} 
-                    onClose={() => togglePanel('project')} 
-                  />
-                )}
-                {layout.console.visible && (
-                  <ConsolePanel 
-                    height={layout.console.height} 
-                    onClose={() => togglePanel('console')} 
-                  />
-                )}
-              </div>
+                <TabbedPanelContainer
+                   world={world}
+                   app={selectedApp}
+                   layout={layout}
+                   panels={bottomCenterPanels}
+                   activeTab={bottomCenterActiveTab}
+                   setActiveTab={setBottomCenterActiveTab}
+                   height={layout.bottomCenterHeight}
+                   onCloseTab={togglePanel}
+                />
             </ResizableBox>
           )}
-
         </div>
 
-        {/* Right Panel (Inspector & Code) */}
-        {layout.inspector.visible && (
+        {/* Right Column (Just Code Panel) */}
+        {layout.code?.visible && (
           <ResizableBox
-            width={layout.inspector.width}
+            width={layout.code.width || 350}
             height={Infinity}
             axis="x"
             resizeHandles={['w']}
             minConstraints={[150, Infinity]}
-            maxConstraints={[800, Infinity]}
-            onResize={handleResize('inspector', 'width')}
+            maxConstraints={[1000, Infinity]}
+            onResize={handleResize('code', 'width')}
             css={css`flex-shrink: 0; display: flex !important; flex-direction: column;`}
           >
-            <div style={{
-                flex: 1,
-                minHeight: 0,
-                display: 'flex', 
-                flexDirection: 'column'
-              }}
-            >
-              <InspectorPanel 
-                selectedApp={selectedApp}
-                world={world}
-                onClose={() => togglePanel('inspector')} 
+            <div style={{flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column'}}>
+              <CodePanel 
+                selectedApp={selectedApp} 
+                world={world} 
+                onClose={() => togglePanel('code')} 
               />
             </div>
-
-            {layout.code.visible && (
-              <ResizableBox
-                width={Infinity}
-                height={layout.code.height}
-                axis="y"
-                resizeHandles={['n']}
-                minConstraints={[Infinity, 50]}
-                maxConstraints={[Infinity, 600]}
-                onResize={handleResize('code', 'height')}
-                css={css`flex-shrink: 0; display: flex !important; flex-direction: column; border-top: 1px solid #1a1a1a;`}
-              >
-                <div style={{width: '100%', height: '100%', display: 'flex', flexDirection: 'column'}}>
-                  <CodePanel 
-                    selectedApp={selectedApp} 
-                    world={world} 
-                    height={layout.code.height} 
-                    onClose={() => togglePanel('code')} 
-                  />
-                </div>
-              </ResizableBox>
-            )}
           </ResizableBox>
         )}
       </div>
-
-      <div 
-        className="status-bar"
-        css={css`
-          height: 20px;
-          background-color: #252525;
-          border-top: 1px solid #1a1a1a;
-          display: flex;
-          align-items: center;
-          padding: 0 10px;
-          justify-content: space-between;
-          font-size: 11px;
-          z-index: 10;
-          flex-shrink: 0;
-        `}
-      >
-        <div>HyperFy Editor v1.0</div>
-        <div>FPS: 60</div>
-      </div>
+      {/* Render Context Menu */}
+      <ContextMenu
+         visible={contextMenu.visible}
+         x={contextMenu.x}
+         y={contextMenu.y}
+         items={contextMenu.items}
+         onClose={hideContextMenu}
+       />
     </div>
   )
 } 
