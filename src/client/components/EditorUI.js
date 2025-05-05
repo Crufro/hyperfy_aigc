@@ -311,9 +311,8 @@ export function EditorUI({ world }) {
   useEffect(() => {
     const onEditorMode = (enabled) => {
       setEditorMode(enabled)
-      if (enabled && world.input) {
-        world.input.setCursorLock(false);
-      }
+      // We no longer need to explicitly set cursor lock to false here
+      // Right-click navigation in the viewport will now control this
     }
     world.on('editor-mode', onEditorMode)
     return () => {
@@ -462,7 +461,10 @@ export function EditorUI({ world }) {
         onDeleteSelectedApp={handleDeleteSelectedApp}
         onUndo={handleUndo}
       />
-      <EditorToolbar />
+      <EditorToolbar
+        currentMode={currentMode}
+        setCurrentMode={setCurrentMode}
+      />
 
       {/* Main Content */}
       <div 

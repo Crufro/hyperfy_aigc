@@ -87,14 +87,14 @@ export class ClientBuilder extends System {
 
   updateActions() {
     const actions = []
-    if (!this.enabled) {
+    if (this.canBuild() && !this.enabled) {
       if (this.canBuild()) {
         actions.push({ type: 'tab', label: 'Editor Mode' })
       }
     }
     if (this.enabled && !this.selected) {
       actions.push({ type: 'mouseLeft', label: modeLabels[this.mode] })
-      actions.push({ type: 'mouseRight', label: 'Inspect' })
+      actions.push({ type: 'mouseRight', label: 'Camera Control' })
       actions.push({ type: 'custom', btn: '123', label: 'Grab / Translate / Rotate' })
       actions.push({ type: 'keyR', label: 'Duplicate' })
       actions.push({ type: 'keyP', label: 'Pin' })
@@ -105,7 +105,7 @@ export class ClientBuilder extends System {
     if (this.enabled && this.selected && this.mode === 'grab') {
       actions.push({ type: 'mouseLeft', label: 'Place' })
       actions.push({ type: 'mouseWheel', label: 'Rotate' })
-      actions.push({ type: 'mouseRight', label: 'Inspect' })
+      actions.push({ type: 'mouseRight', label: 'Camera Control' })
       actions.push({ type: 'custom', btn: '123', label: 'Grab / Translate / Rotate' })
       actions.push({ type: 'keyF', label: 'Push' })
       actions.push({ type: 'keyC', label: 'Pull' })
@@ -116,9 +116,9 @@ export class ClientBuilder extends System {
     }
     if (this.enabled && this.selected && (this.mode === 'translate' || this.mode === 'rotate')) {
       actions.push({ type: 'mouseLeft', label: 'Select / Transform' })
-      actions.push({ type: 'mouseRight', label: 'Inspect' })
+      actions.push({ type: 'mouseRight', label: 'Camera Control' })
       actions.push({ type: 'custom', btn: '123', label: 'Grab / Translate / Rotate' })
-      actions.push({ type: 'keyT', label: this.localSpace ? 'World Space' : 'Local Space' })
+      actions.push({ type: 'keyR', label: 'Duplicate' })
       actions.push({ type: 'keyX', label: 'Destroy' })
       actions.push({ type: 'controlLeft', label: 'No Snap (Hold)' })
       actions.push({ type: 'space', label: 'Jump / Fly (Double-Tap)' })
@@ -130,7 +130,7 @@ export class ClientBuilder extends System {
   update(delta) {
     // toggle editor mode
     if (this.control.tab.pressed) {
-      this.toggle()
+      this.setEditorMode(!this.enabled)
     }
     // deselect if dead
     if (this.selected?.destroyed) {
@@ -144,8 +144,12 @@ export class ClientBuilder extends System {
     if (!this.enabled) {
       return
     }
-    // inspect in pointer-lock
-    if (this.control.mouseRight.pressed && this.control.pointer.locked) {
+    
+    // Check if camera control is active
+    const isCameraControlActive = this.freeCamOrb && this.freeCamOrb.mouseControlActive;
+    
+    // Only handle right mouse button for inspection when NOT in camera control mode
+    if (!isCameraControlActive && this.control.mouseRight.pressed && this.control.pointer.locked) {
       const entity = this.getEntityAtReticle()
       if (entity?.isApp) {
         this.select(null)
@@ -154,11 +158,10 @@ export class ClientBuilder extends System {
       }
     }
     // inspect out of pointer-lock
-    else if (!this.selected && !this.control.pointer.locked && this.control.mouseRight.pressed) {
+    else if (!this.selected && !this.control.pointer.locked && this.control.mouseRight.pressed && !isCameraControlActive) {
       const entity = this.getEntityAtPointer()
       if (entity?.isApp) {
         this.select(null)
-        this.control.pointer.unlock()
         this.world.ui.setMenu({ type: 'app', app: entity })
       }
     }
@@ -427,9 +430,7 @@ export class ClientBuilder extends System {
     }
   }
 
-  toggle(enabled) {
-    if (!this.canBuild()) return
-    enabled = isBoolean(enabled) ? enabled : !this.enabled
+  setEditorMode(enabled) {
     if (this.enabled === enabled) return
     
     // Store previous state
@@ -448,6 +449,10 @@ export class ClientBuilder extends System {
       
       // Create the flying orb entity using the current camera
       this.createFreeCamOrb()
+      
+      // Explicitly unlock pointer when entering editor mode
+      // The pointer will now be controlled via right-click in the viewport
+      this.world.controls.unlockPointer()
     } else {
       // Exiting editor mode
       
@@ -458,6 +463,9 @@ export class ClientBuilder extends System {
       
       // Clean up the orb and return to player
       this.destroyFreeCamOrb()
+      
+      // Lock pointer for regular gameplay mode
+      this.world.controls.lockPointer()
     }
     
     this.updateActions()
@@ -482,6 +490,9 @@ export class ClientBuilder extends System {
     // Create the orb entity
     this.freeCamOrb = new FreeCamOrb(this.world, orbData, true)
     
+    // Expose the freeCamOrb on the world object for easier access from UI components
+    this.world.freeCamOrb = this.freeCamOrb;
+    
     // Hide the player's model while in editor mode
     if (player.avatar) {
       this.playerVisibleBeforeOrb = player.avatar.visible
@@ -497,6 +508,11 @@ export class ClientBuilder extends System {
       // Clean up the orb
       this.freeCamOrb.destroy()
       this.freeCamOrb = null
+      
+      // Remove reference from world object
+      if (this.world.freeCamOrb) {
+        this.world.freeCamOrb = null;
+      }
       
       // Show the player's model again
       const player = this.world.entities.player
@@ -601,9 +617,6 @@ export class ClientBuilder extends System {
     this.gizmo = new TransformControls(this.world.camera, this.viewport)
     this.gizmo.setSize(0.7)
     this.gizmo.space = this.localSpace ? 'local' : 'world'
-    this.gizmo._gizmo.helper.translate.scale.setScalar(0)
-    this.gizmo._gizmo.helper.rotate.scale.setScalar(0)
-    this.gizmo._gizmo.helper.scale.scale.setScalar(0)
     this.gizmo.addEventListener('mouseDown', () => {
       this.gizmoActive = true
     })
@@ -720,7 +733,7 @@ export class ClientBuilder extends System {
     // slight delay to ensure we get updated pointer position from window focus
     await new Promise(resolve => setTimeout(resolve, 100))
     // ensure we in editor mode
-    this.toggle(true)
+    this.setEditorMode(true)
     // add it!
     const maxSize = this.world.network.maxUploadSize * 1024 * 1024
     if (file.size > maxSize) {

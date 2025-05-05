@@ -87,24 +87,34 @@ export function CodePanel({ selectedApp, world, onClose }) {
 
   // Effect to fetch initial code
   useEffect(() => {
-    if (!scriptUrl) {
-      setCodeContent('// Selected app has no script.');
-      editableCodeRef.current = '// Selected app has no script.';
-      setHasChanges(false);
-      setError(null);
-      setIsLoading(false);
-      // Destroy existing editor if app/script changes
-      editorRef.current?.dispose();
+    // First, clean up any existing editor when selected app changes
+    if (editorRef.current) {
+      editorRef.current.dispose();
       editorRef.current = null;
+    }
+    
+    // Reset states when selection changes
+    setError(null);
+    setSaveError(null);
+    setHasChanges(false);
+    setIsLoading(selectedApp != null); // Only show loading if we have a selected app
+
+    if (!selectedApp) {
+      setCodeContent('');
+      editableCodeRef.current = '';
+      return;
+    }
+    
+    if (!scriptUrl) {
+      setCodeContent('');
+      editableCodeRef.current = '';
+      setIsLoading(false);
       return;
     }
 
     let isMounted = true;
     const fetchCode = async () => {
       setIsLoading(true);
-      setError(null);
-      setSaveError(null);
-      setHasChanges(false);
       let initialCode = '// Error loading script'; // Default on error
 
       try {
@@ -133,11 +143,6 @@ export function CodePanel({ selectedApp, world, onClose }) {
           setCodeContent(initialCode);
           editableCodeRef.current = initialCode; // Initialize ref
           setIsLoading(false);
-          // If editor already exists, update its value
-          if (editorRef.current) {
-             editorRef.current.setValue(initialCode);
-             setHasChanges(false); // Reset changes after loading
-          }
         }
       }
     };
@@ -146,65 +151,99 @@ export function CodePanel({ selectedApp, world, onClose }) {
 
     return () => {
       isMounted = false;
-      // Don't dispose here, handle in URL change effect
     };
   }, [scriptUrl, selectedApp, world?.loader]);
 
-  // Effect to initialize Monaco Editor
+  // Separate effect to handle editor initialization
   useEffect(() => {
-    let editorInstance;
-    // Only initialize if we have a mount point and code has been fetched
-    if (monacoMountRef.current && !isLoading && !error && scriptUrl) {
-      loadMonaco().then(monaco => {
-         if (!monaco || !monacoMountRef.current) { 
-             setError("Failed to load Monaco Editor API.");
-             return; 
-         }
-         
-         editorInstance = monaco.editor.create(monacoMountRef.current, {
-            value: editableCodeRef.current, // Use ref for initial value
-            language: 'javascript',
-            theme: 'default', // Use the defined theme
-            scrollBeyondLastLine: false,
-            lineNumbers: 'on',
-            minimap: { enabled: false },
-            automaticLayout: true, // Important for resize handling
-            tabSize: 2,
-            insertSpaces: true,
-            wordWrap: 'off', // Default off
-         });
-
-         // Store instance
-         editorRef.current = editorInstance;
-
-         // Listen for changes
-         editorInstance.onDidChangeModelContent(() => {
-           editableCodeRef.current = editorInstance.getValue();
-           // Update hasChanges state for UI feedback
-           setHasChanges(editableCodeRef.current !== codeContent);
-         });
-
-         // Add save action
-         editorInstance.addAction({
-           id: 'save-script',
-           label: 'Save Script',
-           keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
-           run: () => handleSave(), // Call our save handler
-         });
-         
-         // Set focus
-         editorInstance.focus();
-         setHasChanges(false); // Ensure changes are reset on load
+    // Only create a new editor if we have a script and a mount point
+    if (!monacoMountRef.current || !scriptUrl || isLoading || error) {
+      return;
+    }
+    
+    // Clean up any existing editor before creating a new one
+    if (editorRef.current) {
+      editorRef.current.dispose();
+      editorRef.current = null;
+    }
+    
+    let isMounted = true;
+    
+    loadMonaco().then(monaco => {
+      if (!isMounted || !monaco || !monacoMountRef.current) { 
+        return; 
+      }
+      
+      const editorInstance = monaco.editor.create(monacoMountRef.current, {
+        value: editableCodeRef.current, // Use ref for initial value
+        language: 'javascript',
+        theme: 'default', // Use the defined theme
+        scrollBeyondLastLine: false,
+        lineNumbers: 'on',
+        minimap: { enabled: false },
+        automaticLayout: true, // Important for resize handling
+        tabSize: 2,
+        insertSpaces: true,
+        wordWrap: 'off', // Default off
       });
+
+      // Store instance
+      editorRef.current = editorInstance;
+
+      // Listen for changes
+      editorInstance.onDidChangeModelContent(() => {
+        editableCodeRef.current = editorInstance.getValue();
+        // Update hasChanges state for UI feedback
+        setHasChanges(editableCodeRef.current !== codeContent);
+      });
+
+      // Add save action with explicit keybinding
+      editorInstance.addAction({
+        id: 'save-script',
+        label: 'Save Script',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
+        run: () => handleSave(), // Call our save handler
+      });
+      
+      // Set focus
+      editorInstance.focus();
+      setHasChanges(false); // Ensure changes are reset on load
+    });
+
+    return () => {
+      isMounted = false;
+      if (editorRef.current) {
+        editorRef.current.dispose();
+        editorRef.current = null;
+      }
+    };
+  }, [monacoMountRef.current, scriptUrl, isLoading, error, codeContent]); 
+
+  // Add a global keyboard shortcut for Ctrl+S as a fallback
+  useEffect(() => {
+    // Only add the listener if we have a script and the editor is active
+    if (!selectedApp || !scriptUrl || isLoading || error) {
+      return;
     }
 
-    // Cleanup on unmount or when dependencies change
-    return () => {
-       editorRef.current?.dispose();
-       editorRef.current = null;
+    const handleKeyDown = (e) => {
+      // Check for Ctrl+S or Cmd+S (Mac)
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault(); // Prevent browser save dialog
+        if (hasChanges && !isSaving) {
+          handleSave();
+        }
+      }
     };
-  // Rerun when mount point is ready, loading finishes, errors clear, or scriptUrl changes
-  }, [monacoMountRef.current, isLoading, error, scriptUrl]); 
+
+    // Add the event listener to the document
+    document.addEventListener('keydown', handleKeyDown);
+
+    // Clean up
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [selectedApp, scriptUrl, isLoading, error, hasChanges, isSaving]);
 
   const handleSave = async () => {
     if (!selectedApp || !world || isSaving || !editorRef.current) return;
@@ -237,6 +276,45 @@ export function CodePanel({ selectedApp, world, onClose }) {
       setSaveError(`Failed to save script: ${err.message || err}`);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // New function to create a blank script
+  const handleCreateScript = async () => {
+    if (!selectedApp || !world) return;
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      // Create a blank script content with basic structure - include the app ID for unique identification
+      const blankScriptContent = `// Script for ${selectedApp.blueprint?.name || 'App'} (ID: ${selectedApp.blueprint?.id || 'unknown'})\n\n// This function runs when the app is initialized\nexport function init() {\n  // Your initialization code here\n}\n\n// This function runs on each frame update\nexport function update(time, delta) {\n  // Your update code here\n}\n`;
+      
+      const blob = new Blob([blankScriptContent], { type: 'text/plain' });
+      const file = new File([blob], `script_${selectedApp.blueprint?.id}.js`, { type: 'text/plain' });
+      const hash = await hashFile(file);
+      const filename = `${hash}.js`;
+      const newUrl = `asset://${filename}`;
+
+      world.loader.insert('script', newUrl, file);
+      const newVersion = (selectedApp.blueprint.version || 0) + 1;
+      world.blueprints.modify({ id: selectedApp.blueprint.id, version: newVersion, script: newUrl });
+
+      // Update content state
+      setCodeContent(blankScriptContent);
+      editableCodeRef.current = blankScriptContent;
+      
+      // Upload the file
+      await world.network.upload(file);
+      world.network.send('blueprintModified', { id: selectedApp.blueprint.id, version: newVersion, script: newUrl });
+      
+      // The scriptUrl should change after the blueprint is modified, which will trigger the useEffect above
+      setHasChanges(false);
+    } catch (err) {
+      console.error('Error creating script:', err);
+      setError(`Failed to create script: ${err.message || err}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -289,7 +367,41 @@ export function CodePanel({ selectedApp, world, onClose }) {
                `}
             />
           ) : (
-            <div css={css`padding: 10px; text-align: center; color: #888;`}>Selected app has no script.</div>
+            <div 
+              css={css`
+                padding: 10px; 
+                text-align: center; 
+                color: #888;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                gap: 10px;
+                min-height: 120px;
+                height: auto;
+                margin-top: 20px;
+              `}
+            >
+              <div css={css`font-size: 14px;`}>Selected app has no script.</div>
+              <button
+                onClick={handleCreateScript}
+                css={css`
+                  padding: 8px 16px;
+                  font-size: 14px;
+                  background-color: #4f87ff;
+                  color: white;
+                  border: none;
+                  border-radius: 4px;
+                  cursor: pointer;
+                  margin-top: 5px;
+                  &:hover {
+                    background-color: #699dff;
+                  }
+                `}
+              >
+                Add Script
+              </button>
+            </div>
           )
         ) : (
           <div css={css`padding: 10px; text-align: center; color: #888;`}>Select an app in the Hierarchy to view its code.</div>

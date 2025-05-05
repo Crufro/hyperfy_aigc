@@ -27,7 +27,11 @@ import {
   SparkleIcon,
   ZapIcon,
   Trash2Icon,
+  Move3dIcon,
+  Rotate3dIcon,
+  ScalingIcon,
 } from 'lucide-react'
+import * as THREE from '../../core/extras/three'
 
 import { hashFile } from '../../core/utils-client'
 import { useUpdate } from './useUpdate'
@@ -47,6 +51,7 @@ import {
 } from './Inputs'
 import { isArray } from 'lodash-es'
 import { Fields } from './FieldsPanel'
+import { RAD2DEG, DEG2RAD } from '../../core/extras/general'
 
 // Deprecated InspectPane - logic moved to individual panel components
 // export function InspectPane({ world, entity }) { ... }
@@ -57,11 +62,87 @@ const extToType = {
 }
 const allowedModels = ['glb', 'vrm']
 
+// Helper component for transform inputs
+function TransformInputGroup({ label, icon: Icon, x, y, z, onChange }) {
+  const step = 0.1
+  return (
+    <div className='transform-group'>
+      <div className='transform-label'>
+        <Icon size={12} />
+        <span>{label}</span>
+      </div>
+      <div className='transform-inputs'>
+        <InputNumber value={x} onChange={v => onChange('x', v)} step={step} label='X' />
+        <InputNumber value={y} onChange={v => onChange('y', v)} step={step} label='Y' />
+        <InputNumber value={z} onChange={v => onChange('z', v)} step={step} label='Z' />
+      </div>
+    </div>
+  )
+}
+
 // --- New App Main Panel --- 
 export function AppMainPanel({ world, app }) {
   const [blueprint, setBlueprint] = useState(app.blueprint)
   const canEdit = !blueprint.frozen && hasRole(world.entities.player.data.roles, 'admin', 'builder')
   const [fileInputKey, setFileInputKey] = useState(0)
+  const update = useUpdate()
+
+  // Transform State
+  const [position, setPosition] = useState({ x: 0, y: 0, z: 0 })
+  const [rotation, setRotation] = useState({ x: 0, y: 0, z: 0 })
+  const [scale, setScale] = useState({ x: 1, y: 1, z: 1 })
+
+  // Effect to update local transform state from app.root
+  useEffect(() => {
+    if (!app?.root) return
+
+    const updateTransforms = () => {
+      if (!app?.root) return
+      // Position
+      setPosition({
+        x: app.root.position.x,
+        y: app.root.position.y,
+        z: app.root.position.z,
+      })
+      // Rotation (Euler Degrees)
+      const euler = new THREE.Euler().setFromQuaternion(app.root.quaternion, 'YXZ')
+      setRotation({
+        x: euler.x * RAD2DEG,
+        y: euler.y * RAD2DEG,
+        z: euler.z * RAD2DEG,
+      })
+      // Scale
+      setScale({
+        x: app.root.scale.x,
+        y: app.root.scale.y,
+        z: app.root.scale.z,
+      })
+    }
+
+    // Initial update
+    updateTransforms()
+
+    // --- Listener for external changes (e.g., gizmo, grab mode) ---
+    const intervalId = setInterval(() => {
+      if (app?.root && (
+          Math.abs(position.x - app.root.position.x) > 0.001 ||
+          Math.abs(position.y - app.root.position.y) > 0.001 ||
+          Math.abs(position.z - app.root.position.z) > 0.001 ||
+          Math.abs(scale.x - app.root.scale.x) > 0.001 ||
+          Math.abs(scale.y - app.root.scale.y) > 0.001 ||
+          Math.abs(scale.z - app.root.scale.z) > 0.001 ||
+          !new THREE.Quaternion().setFromEuler(new THREE.Euler(
+            rotation.x * DEG2RAD, rotation.y * DEG2RAD, rotation.z * DEG2RAD, 'YXZ'
+          )).equals(app.root.quaternion)
+      )) {
+         updateTransforms();
+      }
+    }, 250);
+
+    return () => {
+      clearInterval(intervalId);
+    }
+  }, [app])
 
   // Update blueprint state if the app's blueprint changes externally
   useEffect(() => {
@@ -118,18 +199,105 @@ export function AppMainPanel({ world, app }) {
     world.network.send('blueprintModified', { id: blueprint.id, version, [key]: value })
   }
 
+  // Helper function to handle transform changes and update app.root
+  const handleTransformChange = (transformType, axis, value) => {
+    if (!app?.root || !world?.builder) return;
+
+    const numericValue = parseFloat(value);
+    if (isNaN(numericValue)) return;
+
+    // --- Add Undo Step ---
+    const currentPositionArray = app.root.position.toArray();
+    const currentQuaternionArray = app.root.quaternion.toArray();
+    world.builder.addUndo({
+      name: 'move-entity',
+      entityId: app.data.id,
+      position: currentPositionArray,
+      quaternion: currentQuaternionArray,
+    });
+
+    // --- Update local UI state immediately ---
+    let stateUpdater, stateValue;
+    if (transformType === 'position') {
+      stateUpdater = setPosition;
+      stateValue = numericValue;
+    } else if (transformType === 'rotation') {
+      stateUpdater = setRotation;
+      stateValue = numericValue;
+    } else if (transformType === 'scale') {
+      stateUpdater = setScale;
+      stateValue = numericValue === 0 ? 0.001 : numericValue; // Prevent zero scale in state
+    }
+    if (stateUpdater) {
+      stateUpdater(prev => ({ ...prev, [axis]: stateValue }));
+    }
+
+    // --- Update app.root (Use callback with latest state for rotation) ---
+    // Using state updaters' callback ensures we use the *most recent* state
+    // especially important for rotation conversion.
+    let newPositionArray, newQuaternionArray;
+    if (transformType === 'position') {
+      app.root.position[axis] = numericValue;
+      newPositionArray = app.root.position.toArray();
+      newQuaternionArray = app.root.quaternion.toArray(); // Get current quaternion
+    } else if (transformType === 'rotation') {
+       // Use the latest state value directly from the closure
+      setRotation(currentState => {
+         const updatedState = { ...currentState, [axis]: numericValue };
+         const newEuler = new THREE.Euler(
+           updatedState.x * DEG2RAD,
+           updatedState.y * DEG2RAD,
+           updatedState.z * DEG2RAD,
+           'YXZ'
+         );
+         app.root.quaternion.setFromEuler(newEuler);
+         newQuaternionArray = app.root.quaternion.toArray();
+         newPositionArray = app.root.position.toArray(); // Get current position
+         return updatedState; // Return the updated state for React
+      });
+    } else if (transformType === 'scale') {
+      // Ensure scale is not zero on the object itself
+      app.root.scale[axis] = stateValue; // Use the already clamped stateValue
+      newPositionArray = app.root.position.toArray(); 
+      newQuaternionArray = app.root.quaternion.toArray();
+    }
+
+    // Mark the object as needing a matrix update
+    app.root.matrixWorldNeedsUpdate = true; 
+
+    // --- Update app.data and Send Network Update (for position/rotation) ---
+    // Ensure we have the final arrays after potential async state updates (esp. for rotation)
+    if (newPositionArray && newQuaternionArray && (transformType === 'position' || transformType === 'rotation')) {
+      app.data.position = newPositionArray;
+      app.data.quaternion = newQuaternionArray;
+
+      world.network.send('entityModified', {
+        id: app.data.id,
+        position: app.data.position,
+        quaternion: app.data.quaternion,
+      });
+
+      // Rebuild the entity to reflect data changes internally
+      app.build();
+    } else if (transformType === 'scale') {
+       // If only scale changed, still call build() to potentially update internal state if needed
+       // although scale doesn't seem to be in app.data 
+       app.build(); 
+    }
+  };
+
   return (
     <div
-      className='app-main-panel noscrollbar' // Use specific class
+      className='app-main-panel noscrollbar'
       css={css`
         height: 100%; 
         display: flex;
         flex-direction: column;
-        overflow: hidden; /* Contains scroll */
-        background-color: #303030; /* Match editor panel background */
+        overflow: hidden;
+        background-color: #303030;
         color: #ddd;
 
-        .app-main-content { /* Scrollable content area */
+        .app-main-content {
           flex: 1;
           overflow-y: auto;
           padding: 10px;
@@ -157,7 +325,7 @@ export function AppMainPanel({ world, app }) {
         
         .panel-toggle-section {
           display: grid;
-          grid-template-columns: repeat(2, 1fr); /* Two columns */
+          grid-template-columns: repeat(2, 1fr);
           gap: 5px;
           margin: 10px 0;
         }
@@ -170,21 +338,20 @@ export function AppMainPanel({ world, app }) {
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            color: #8a8c9e; /* Default color */
+            color: #8a8c9e;
             cursor: pointer;
             text-align: center;
             font-size: 11px;
             border: 1px solid transparent;
             svg {
               margin-bottom: 4px;
-              color: #606275; /* Icon default color */
+              color: #606275;
             }
             &:hover { background-color: #30313a; }
             &.active {
               color: white;
               border-color: #5097ff; 
               svg {
-                /* Keep icon color consistent or change based on state */
               }
               &.green svg { color: #50ff51; }
               &.blue svg { color: #5097ff; }
@@ -195,21 +362,53 @@ export function AppMainPanel({ world, app }) {
 
         .panel-section-divider {
           border-top: 1px solid #1a1a1a;
-          margin: 10px -10px; /* Extend to edges */
+          margin: 10px -10px;
         }
         
         .panel-fields-container {
           margin-top: 5px;
         }
         
-        .panel-top-actions { /* Container for top buttons */
+        .panel-top-actions {
             display: flex;
-            justify-content: space-between; /* Space out buttons */
+            justify-content: space-between;
             margin-bottom: 10px;
             gap: 10px;
             .panel-button { margin: 0; flex: 1; }
         }
         
+        .transform-section {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          margin-bottom: 10px;
+        }
+        .transform-group {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+        .transform-label {
+          width: 70px;
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          font-size: 11px;
+          color: #aaa;
+          gap: 4px;
+          svg { 
+              flex-shrink: 0; 
+              margin-top: -1px;
+          }
+        }
+        .transform-inputs {
+          flex-grow: 1;
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 5px;
+          .input-number {
+          }
+        }
       `}
     >
       <div className='app-main-content'>
@@ -233,6 +432,35 @@ export function AppMainPanel({ world, app }) {
                    <span>Model: {blueprint.model.split('/').pop()}</span>
                </div>
           )}
+
+          {/* --- Transform Section --- */}
+          <div className='transform-section'>
+            <TransformInputGroup
+              label="Position"
+              icon={Move3dIcon}
+              x={position.x}
+              y={position.y}
+              z={position.z}
+              onChange={(axis, value) => handleTransformChange('position', axis, value)}
+            />
+            <TransformInputGroup
+              label="Rotation"
+              icon={Rotate3dIcon}
+              x={rotation.x}
+              y={rotation.y}
+              z={rotation.z}
+              onChange={(axis, value) => handleTransformChange('rotation', axis, value)}
+            />
+            <TransformInputGroup
+              label="Scale"
+              icon={ScalingIcon}
+              x={scale.x}
+              y={scale.y}
+              z={scale.z}
+              onChange={(axis, value) => handleTransformChange('scale', axis, value)}
+            />
+          </div>
+          <div className='panel-section-divider' />
 
           {/* Toggles */} 
           {canEdit && (
@@ -304,16 +532,16 @@ export function AppMetaPanel({ world, app }) {
         height: 100%; 
         overflow-y: auto;
         padding: 10px;
-        background-color: #303030; /* Match editor panel background */
+        background-color: #303030;
         color: #ddd;
         
         .meta-field {
           display: flex;
-          align-items: flex-start; /* Align label top */
+          align-items: flex-start;
           margin-bottom: 8px;
           &-label {
             width: 80px;
-            padding-top: 5px; /* Align with input text */
+            padding-top: 5px;
             font-size: 11px;
             color: #aaa;
             flex-shrink: 0;
@@ -394,18 +622,18 @@ function renderHierarchy(nodes, depth = 0, selectedNode, setSelectedNode) {
 
     const children = node.children || []
     const hasChildren = Array.isArray(children) && children.length > 0
-    const isSelected = selectedNode?.uuid === node.uuid // Use uuid for selection
+    const isSelected = selectedNode?.uuid === node.uuid
     const Icon = nodeIcons[node.name] || nodeIcons[node.type?.toLowerCase()] || nodeIcons.default
     const nodeName = node.name || node.type || `Node_${node.uuid?.substring(0, 4)}`
 
     return (
-      <div key={node.uuid || node.id}> {/* Prefer uuid for key */}
+      <div key={node.uuid || node.id}>
         <div
           className={cls('nodes-item', {
             'nodes-item-indent': depth > 0,
             selected: isSelected,
           })}
-          style={{ paddingLeft: depth * 15 + 5 }} // Indentation + base padding
+          style={{ paddingLeft: depth * 15 + 5 }}
           onClick={() => setSelectedNode(node)}
         >
           <Icon size={14} />
@@ -431,35 +659,28 @@ function HierarchyDetail({ label, value, copy }) {
 
 export function AppNodesPanel({ app }) {
   const [selectedNode, setSelectedNode] = useState(null)
-  const rootNode = useMemo(() => app.getNodes ? app.getNodes() : null, [app]) // Get nodes via method
+  const rootNode = useMemo(() => app.getNodes ? app.getNodes() : null, [app])
 
   // Select root node initially if available
   useEffect(() => {
-    // Set initial selection to root node if nothing is selected
     if (rootNode && !selectedNode) {
       setSelectedNode(rootNode);
     }
 
-    // Deselect if current selection is no longer valid in the live scene graph
     if (selectedNode) { 
         let existsInScene = false;
-        // Check if app, app.root, selectedNode.uuid, and the method exist before calling
         if (app?.root && selectedNode.uuid && typeof app.root.getObjectByProperty === 'function') { 
             try {
               existsInScene = !!app.root.getObjectByProperty('uuid', selectedNode.uuid);
             } catch (error) {
                console.error("Error checking node existence in scene:", error);
-               existsInScene = false; // Assume not found on error
+               existsInScene = false;
             }
         }
-        // If the selected node doesn't exist in the current scene graph, 
-        // reset selection to the current root node (or null if rootNode is also gone)
         if (!existsInScene) {
             setSelectedNode(rootNode || null); 
         }
     } 
-    // If no node is selected, but there's a root node, select the root node.
-    // This handles cases where the selection might have been nullified previously.
     else if (!selectedNode && rootNode) {
         setSelectedNode(rootNode);
     }
@@ -474,23 +695,23 @@ export function AppNodesPanel({ app }) {
         display: flex;
         flex-direction: column;
         overflow: hidden; 
-        background-color: #303030; /* Match editor panel background */
+        background-color: #303030;
         color: #ddd;
 
         .nodes-tree-container {
-          flex: 1; /* Takes up available space */
+          flex: 1;
           overflow-y: auto;
           padding: 5px;
           border-bottom: 1px solid #1a1a1a; 
-          min-height: 50px; /* Ensure it's visible */
+          min-height: 50px;
         }
         
         .nodes-item {
           display: flex;
           align-items: center;
-          padding: 3px 5px; /* Reduced padding */
+          padding: 3px 5px;
           border-radius: 3px;
-          font-size: 11px; /* Smaller font */
+          font-size: 11px;
           cursor: pointer;
           white-space: nowrap;
           &:hover {
@@ -498,7 +719,7 @@ export function AppNodesPanel({ app }) {
           }
           &.selected {
             color: white;
-            background: #4f87ff; /* Selection color */
+            background: #4f87ff;
           }
           svg {
             margin-right: 5px;
@@ -509,7 +730,6 @@ export function AppNodesPanel({ app }) {
             overflow: hidden;
             text-overflow: ellipsis;
           }
-          /* Indentation handled by inline style */
         }
         
         .nodes-empty {
@@ -522,7 +742,7 @@ export function AppNodesPanel({ app }) {
         .nodes-details-container {
           flex-shrink: 0;
           padding: 10px;
-          max-height: 50%; /* Limit details height */
+          max-height: 50%;
           overflow-y: auto;
         }
         

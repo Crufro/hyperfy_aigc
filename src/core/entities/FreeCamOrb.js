@@ -6,7 +6,7 @@ import { DEG2RAD, RAD2DEG } from '../extras/general'
 
 const UP = new THREE.Vector3(0, 1, 0)
 const FORWARD = new THREE.Vector3(0, 0, -1)
-const POINTER_LOOK_SPEED = 0.1
+const POINTER_LOOK_SPEED = 0.3
 const FLIGHT_SPEED = 15
 const BOOST_SPEED = 30
 
@@ -32,6 +32,11 @@ export class FreeCamOrb extends Entity {
     this.flying = true
     this.moving = false
     this.boosting = false
+    this.mouseControlActive = false // Track if right mouse button is down
+    
+    // Add direct mouse control properties
+    this.lastMouseX = null
+    this.lastMouseY = null
     
     // Set initial position from data
     if (data.position) {
@@ -85,74 +90,117 @@ export class FreeCamOrb extends Entity {
       priority: ControlPriorities.BUILDER + 1,
     });
     
+    // Set up right mouse button handler
+    this.control.mouseRight.onPress = () => {
+      console.log("FreeCamOrb: Right mouse button pressed - Activating camera control");
+      this.mouseControlActive = true;
+      
+      // Reset mouse position tracking
+      this.lastMouseX = null;
+      this.lastMouseY = null;
+      
+      return false; // Don't capture the event
+    };
+    
+    this.control.mouseRight.onRelease = () => {
+      console.log("FreeCamOrb: Right mouse button released - Deactivating camera control");
+      this.mouseControlActive = false;
+      
+      // Reset mouse position tracking
+      this.lastMouseX = null;
+      this.lastMouseY = null;
+    };
+    
     // Take over camera control
     this.control.camera.write = true;
     this.control.camera.position.copy(this.base.position);
     this.control.camera.quaternion.copy(this.base.quaternion);
     this.control.camera.zoom = 0;
     
-    // Lock the pointer for first-person control
-    if (!this.control.pointer.locked) {
-      this.control.pointer.lock();
-    }
+    console.log("FreeCamOrb: Initialized with position", this.base.position);
+    
+    // Add direct mouse movement handler to window
+    this.mouseMoveHandler = this.handleMouseMove.bind(this);
+    window.addEventListener('mousemove', this.mouseMoveHandler);
+  }
+  
+  // Direct mouse movement handler
+  handleMouseMove(e) {
+    if (!this.mouseControlActive) return;
+    
+    // Get movement from event
+    const movementX = e.movementX || 0;
+    const movementY = e.movementY || 0;
+    
+    if (movementX === 0 && movementY === 0) return;
+    
+    console.log(`FreeCamOrb: Direct mouse movement: x=${movementX}, y=${movementY}`);
+    
+    // Apply directly to rotation
+    this.base.rotation.y -= movementX * POINTER_LOOK_SPEED * 0.01;
+    this.base.rotation.x -= movementY * POINTER_LOOK_SPEED * 0.01;
+    
+    // Clamp vertical look angle
+    this.base.rotation.x = clamp(this.base.rotation.x, -89 * DEG2RAD, 89 * DEG2RAD);
+    
+    // Keep rotation level
+    this.base.rotation.z = 0;
+    
+    console.log(`FreeCamOrb: Updated rotation: x=${this.base.rotation.x.toFixed(4)}, y=${this.base.rotation.y.toFixed(4)}`);
   }
   
   update(delta) {
     if (!this.control) return;
     
-    // Update camera look direction with pointer movement
-    if (this.control.pointer.locked) {
-      this.base.rotation.x += -this.control.pointer.delta.y * POINTER_LOOK_SPEED * delta;
-      this.base.rotation.y += -this.control.pointer.delta.x * POINTER_LOOK_SPEED * delta;
-      this.base.rotation.z = 0;
+    // Only calculate movement if mouse right button is down
+    if (this.mouseControlActive) {
+      // Calculate movement direction based on WASD keys
+      this.moveDir.set(0, 0, 0);
       
-      // Clamp vertical look angle
-      this.base.rotation.x = clamp(this.base.rotation.x, -89 * DEG2RAD, 89 * DEG2RAD);
-    }
-    
-    // Calculate movement direction based on WASD keys
-    this.moveDir.set(0, 0, 0);
-    
-    // Forward/backward movement
-    if (this.control.keyW.down) this.moveDir.z -= 1;
-    if (this.control.keyS.down) this.moveDir.z += 1;
-    
-    // Left/right movement
-    if (this.control.keyA.down) this.moveDir.x -= 1;
-    if (this.control.keyD.down) this.moveDir.x += 1;
-    
-    // Up/down movement (now space for up, C for down)
-    if (this.control.keyE.down || this.control.space.down) this.moveDir.y += 1;
-    if (this.control.keyC.down) this.moveDir.y -= 1;
-    
-    // Track if we're moving at all
-    this.moving = this.moveDir.lengthSq() > 0;
-    
-    // Check if boost is active
-    this.boosting = this.control.shiftLeft.down;
-    
-    // Normalize direction
-    if (this.moving) {
-      this.moveDir.normalize();
-    }
-    
-    // Apply camera rotation to movement vector
-    this.flyDir.copy(this.moveDir);
-    e1.set(this.base.rotation.x, this.base.rotation.y, 0); // Use base rotation
-    q1.setFromEuler(e1);
-    this.flyDir.applyQuaternion(q1);
-    
-    // Apply movement to position
-    if (this.moving) {
-      const speed = this.boosting ? BOOST_SPEED : FLIGHT_SPEED;
-      this.base.position.addScaledVector(this.flyDir, speed * delta);
+      // Forward/backward movement
+      if (this.control.keyW.down) this.moveDir.z -= 1;
+      if (this.control.keyS.down) this.moveDir.z += 1;
       
-      // Send position update to network
-      this.world.network.send('entityModified', {
-        id: this.data.id,
-        p: this.base.position.toArray(),
-        q: this.base.quaternion.toArray(), // Use base quaternion
-      });
+      // Left/right movement
+      if (this.control.keyA.down) this.moveDir.x -= 1;
+      if (this.control.keyD.down) this.moveDir.x += 1;
+      
+      // Up/down movement (now space for up, C for down)
+      if (this.control.keyE.down || this.control.space.down) this.moveDir.y += 1;
+      if (this.control.keyC.down) this.moveDir.y -= 1;
+      
+      // Track if we're moving at all
+      this.moving = this.moveDir.lengthSq() > 0;
+      
+      // Check if boost is active
+      this.boosting = this.control.shiftLeft.down;
+      
+      // Normalize direction
+      if (this.moving) {
+        this.moveDir.normalize();
+      }
+      
+      // Apply camera rotation to movement vector
+      this.flyDir.copy(this.moveDir);
+      e1.set(this.base.rotation.x, this.base.rotation.y, 0); // Use base rotation
+      q1.setFromEuler(e1);
+      this.flyDir.applyQuaternion(q1);
+      
+      // Apply movement to position
+      if (this.moving) {
+        const speed = this.boosting ? BOOST_SPEED : FLIGHT_SPEED;
+        this.base.position.addScaledVector(this.flyDir, speed * delta);
+        
+        // Send position update to network
+        this.world.network.send('entityModified', {
+          id: this.data.id,
+          p: this.base.position.toArray(),
+          q: this.base.quaternion.toArray(), // Use base quaternion
+        });
+      }
+    } else {
+      // Reset movement state when not controlling
+      this.moving = false;
     }
   }
   
@@ -167,6 +215,12 @@ export class FreeCamOrb extends Entity {
   
   destroy() {
     try {
+      // Remove the mouse move handler
+      if (this.mouseMoveHandler) {
+        window.removeEventListener('mousemove', this.mouseMoveHandler);
+        this.mouseMoveHandler = null;
+      }
+      
       // Store the final camera position and rotation if possible
       let finalPosition, finalQuaternion;
       try {

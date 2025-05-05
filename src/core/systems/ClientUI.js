@@ -27,6 +27,7 @@ export class ClientUI extends System {
         this.setMenu({ type: 'main' })
       }
     }
+    /*
     if (
       this.control.keyZ.pressed &&
       !this.control.metaLeft.down &&
@@ -35,6 +36,7 @@ export class ClientUI extends System {
     ) {
       this.toggleUI()
     }
+    */
     if (this.control.pointer.locked) {
       if (this.menu?.type === 'main') {
         this.setMenu(null)

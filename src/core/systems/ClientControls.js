@@ -63,6 +63,8 @@ export class ClientControls extends System {
       delta: 0,
     }
     this.xrSession = null
+    this.lastMouseX = undefined
+    this.lastMouseY = undefined
   }
 
   start() {
@@ -157,8 +159,15 @@ export class ClientControls extends System {
   }
 
   postLateUpdate() {
-    // clear pointer delta
+    // Only clear delta at the end of the frame to prevent losing mouse movements
+    // Store delta for debug before clearing
+    if (this.rmbDown && (this.pointer.delta.x !== 0 || this.pointer.delta.y !== 0)) {
+      console.log(`Frame end - Delta cleared: x=${this.pointer.delta.x}, y=${this.pointer.delta.y}`);
+    }
+    
+    // Clear delta after processing
     this.pointer.delta.set(0, 0, 0)
+    
     // clear scroll delta
     this.scroll.delta = 0
     // clear buttons
@@ -172,7 +181,7 @@ export class ClientControls extends System {
       }
     }
     // update camera
-    let written
+    let written = false
     for (const control of this.controls) {
       const camera = control.entries.camera
       if (camera?.write && !written) {
@@ -342,6 +351,10 @@ export class ClientControls extends System {
     if (code === 'Tab') {
       // prevent default focus switching behavior
       e.preventDefault()
+      // Unlock pointer when Tab is pressed
+      this.unlockPointer()
+      // Optionally, still treat Tab as a button press if needed elsewhere?
+      // For now, we assume Tab's only function here is to unlock.
     }
     const prop = codeToProp[code]
     const text = e.key
@@ -387,16 +400,52 @@ export class ClientControls extends System {
 
   onPointerMove = e => {
     if (e.isCoreUI) return
-    // this.checkPointerChanges(e)
+    
+    // Get viewport rect for coordinate calculations
     const rect = this.viewport.getBoundingClientRect()
     const offsetX = e.pageX - rect.left
     const offsetY = e.pageY - rect.top
-    this.pointer.coords.x = Math.max(0, Math.min(1, offsetX / rect.width)) // prettier-ignore
-    this.pointer.coords.y = Math.max(0, Math.min(1, offsetY / rect.height)) // prettier-ignore
+    
+    // Update normalized coordinates (0 to 1)
+    this.pointer.coords.x = Math.max(0, Math.min(1, offsetX / rect.width))
+    this.pointer.coords.y = Math.max(0, Math.min(1, offsetY / rect.height))
+    
+    // Update pixel coordinates
     this.pointer.position.x = offsetX
     this.pointer.position.y = offsetY
-    this.pointer.delta.x += e.movementX
-    this.pointer.delta.y += e.movementY
+    
+    // Handle deltas differently based on right mouse button state
+    if (this.rmbDown) {
+      // When right mouse is down, we want to track deltas for camera control
+      
+      // Use movementX/Y when available (more accurate)
+      if (e.movementX !== undefined && e.movementY !== undefined) {
+        this.pointer.delta.x += e.movementX
+        this.pointer.delta.y += e.movementY
+        
+        // For debugging
+        console.log(`Browser movement: x=${e.movementX}, y=${e.movementY}`)
+      } 
+      // Fallback to manual delta calculation
+      else if (this.lastMouseX !== undefined && this.lastMouseY !== undefined) {
+        const deltaX = offsetX - this.lastMouseX
+        const deltaY = offsetY - this.lastMouseY
+        this.pointer.delta.x += deltaX
+        this.pointer.delta.y += deltaY
+        
+        // For debugging
+        console.log(`Manual movement: x=${deltaX}, y=${deltaY}`)
+      }
+      
+      // Store current position for next delta calculation
+      this.lastMouseX = offsetX
+      this.lastMouseY = offsetY
+    } 
+    // When pointer is locked but not right mouse button
+    else if (this.pointer.locked) {
+      this.pointer.delta.x += e.movementX || 0
+      this.pointer.delta.y += e.movementY || 0
+    }
   }
 
   onPointerUp = e => {
@@ -438,6 +487,9 @@ export class ClientControls extends System {
     if (!this.rmbDown && rmb) {
       this.rmbDown = true
       this.buttonsDown.add(MouseRight)
+      // Reset position tracking for delta calculation
+      this.lastMouseX = undefined
+      this.lastMouseY = undefined
       for (const control of this.controls) {
         const button = control.entries.mouseRight
         if (button) {
@@ -452,6 +504,9 @@ export class ClientControls extends System {
     if (this.rmbDown && !rmb) {
       this.rmbDown = false
       this.buttonsDown.delete(MouseRight)
+      // Clear position tracking
+      this.lastMouseX = undefined
+      this.lastMouseY = undefined
       for (const control of this.controls) {
         const button = control.entries.mouseRight
         if (button) {

@@ -1,9 +1,7 @@
 import { css } from '@firebolt-dev/css';
-import React, { useState } from 'react';
+import React from 'react';
 
-export function EditorToolbar({ /* Props TBD: e.g., currentMode, onModeChange */ }) {
-  const [activeTool, setActiveTool] = useState(null);
-
+export function EditorToolbar({ currentMode, setCurrentMode }) {
   const buttonBaseStyle = css`
     background-color: #555;
     border: 1px solid #444;
@@ -44,11 +42,6 @@ export function EditorToolbar({ /* Props TBD: e.g., currentMode, onModeChange */
     }
   `;
 
-  const handleToolClick = (toolName) => {
-    setActiveTool(prevTool => prevTool === toolName ? null : toolName);
-    console.log(`Tool selected: ${toolName}`);
-  };
-
   return (
     <div
       className="toolbar"
@@ -72,22 +65,22 @@ export function EditorToolbar({ /* Props TBD: e.g., currentMode, onModeChange */
         </div>
         <div css={css`display: flex; gap: 5px;`}>
           <button
-            css={css`${buttonBaseStyle} ${activeTool === 'Move' ? activeButtonStyle : ''}`}
-            onClick={() => handleToolClick('Move')}
+            css={css`${buttonBaseStyle} ${currentMode === 'translate' ? activeButtonStyle : ''}`}
+            onClick={() => setCurrentMode('translate')}
             title="Move Tool (M)"
           >
             <img src="/icons/move.svg" alt="Move" />
           </button>
           <button
-            css={css`${buttonBaseStyle} ${activeTool === 'Rotate' ? activeButtonStyle : ''}`}
-            onClick={() => handleToolClick('Rotate')}
+            css={css`${buttonBaseStyle} ${currentMode === 'rotate' ? activeButtonStyle : ''}`}
+            onClick={() => setCurrentMode('rotate')}
             title="Rotate Tool (R)"
           >
             <img src="/icons/rotate.svg" alt="Rotate" />
           </button>
           <button
-            css={css`${buttonBaseStyle} ${activeTool === 'Scale' ? activeButtonStyle : ''}`}
-            onClick={() => handleToolClick('Scale')}
+            css={css`${buttonBaseStyle} ${currentMode === 'Scale' ? activeButtonStyle : ''}`}
+            onClick={() => console.log('Scale tool clicked - TBD')}
             title="Scale Tool (S)"
           >
             <img src="/icons/scale.svg" alt="Scale" />

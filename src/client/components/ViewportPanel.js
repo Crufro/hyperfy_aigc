@@ -1,20 +1,153 @@
 import { css } from '@firebolt-dev/css';
-import React, { useMemo, useState, useEffect } from 'react'; // Import hooks
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react'; // Added useRef
 import { SunIcon } from 'lucide-react'; // Import icon
 import { CanvasView } from './CanvasView'; // Import CanvasView
 import { InputDropdown, InputSwitch } from './Inputs'; // Import input components
 
 export function ViewportPanel({ world, editorMode, layout, togglePanel /* canvasRef is handled by CoreUI for now */ }) {
+  const [isRightMouseDown, setIsRightMouseDown] = useState(false);
+  const canvasContainerRef = useRef(null);
+  const [canvasElement, setCanvasElement] = useState(null);
+  
+  // Setup event listeners on the actual canvas element once it's available
+  useEffect(() => {
+    if (!editorMode || !canvasContainerRef.current || !world || !world.graphics) return;
+    
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.addedNodes.length) {
+          // Find the canvas element that Three.js creates
+          const canvas = canvasContainerRef.current.querySelector('canvas');
+          if (canvas) {
+            console.log("Found Three.js canvas, attaching event listeners");
+            setCanvasElement(canvas);
+            observer.disconnect();
+          }
+        }
+      }
+    });
+    
+    // Watch for changes in the canvas container to detect when Three.js adds its canvas
+    observer.observe(canvasContainerRef.current, { childList: true });
+    
+    return () => {
+      observer.disconnect();
+    };
+  }, [editorMode, world]);
+  
+  // Handle right mouse button events
+  const handleMouseDown = useCallback((e) => {
+    // Only in editor mode we track right mouse button
+    if (editorMode && e.button === 2) {
+      setIsRightMouseDown(true);
+      e.preventDefault(); // Prevent default context menu
+      
+      // Notify FreeCamOrb directly through the world
+      if (world && world.builder && world.builder.freeCamOrb) {
+        // Simulate right mouse press
+        const rightMouseButton = world.builder.freeCamOrb.control?.mouseRight;
+        if (rightMouseButton && rightMouseButton.onPress) {
+          rightMouseButton.onPress();
+        }
+      }
+    }
+  }, [editorMode, world]);
+  
+  const handleMouseUp = useCallback((e) => {
+    // Only in editor mode we track right mouse button
+    if (editorMode && e.button === 2) {
+      setIsRightMouseDown(false);
+      
+      // Notify FreeCamOrb directly through the world
+      if (world && world.builder && world.builder.freeCamOrb) {
+        // Simulate right mouse release
+        const rightMouseButton = world.builder.freeCamOrb.control?.mouseRight;
+        if (rightMouseButton && rightMouseButton.onRelease) {
+          rightMouseButton.onRelease();
+        }
+      }
+    }
+  }, [editorMode, world]);
+  
+  const handleContextMenu = useCallback((e) => {
+    // Always prevent context menu in editor mode
+    if (editorMode) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, [editorMode]);
+  
+  // Attach event listeners to the canvas element when it's available
+  useEffect(() => {
+    if (!canvasElement || !editorMode) return;
+    
+    canvasElement.addEventListener('mousedown', handleMouseDown);
+    canvasElement.addEventListener('mouseup', handleMouseUp);
+    canvasElement.addEventListener('contextmenu', handleContextMenu);
+    
+    // Add cursor styles directly to canvas
+    canvasElement.style.cursor = getCursorStyle();
+    
+    // Set document mouse up listener to handle cases where mouse is released outside viewport
+    const handleDocumentMouseUp = (e) => {
+      if (e.button === 2) {
+        setIsRightMouseDown(false);
+        
+        // Notify FreeCamOrb directly
+        if (world && world.builder && world.builder.freeCamOrb) {
+          const rightMouseButton = world.builder.freeCamOrb.control?.mouseRight;
+          if (rightMouseButton && rightMouseButton.onRelease) {
+            rightMouseButton.onRelease();
+          }
+        }
+      }
+    };
+    
+    document.addEventListener('mouseup', handleDocumentMouseUp);
+    
+    // Create MutationObserver to watch for style changes
+    const styleObserver = new MutationObserver(() => {
+      if (canvasElement) {
+        canvasElement.style.cursor = getCursorStyle();
+      }
+    });
+    
+    styleObserver.observe(canvasElement, { attributes: true, attributeFilter: ['style'] });
+    
+    return () => {
+      canvasElement.removeEventListener('mousedown', handleMouseDown);
+      canvasElement.removeEventListener('mouseup', handleMouseUp);
+      canvasElement.removeEventListener('contextmenu', handleContextMenu);
+      document.removeEventListener('mouseup', handleDocumentMouseUp);
+      styleObserver.disconnect();
+    };
+  }, [canvasElement, editorMode, handleMouseDown, handleMouseUp, handleContextMenu, world, isRightMouseDown]);
+  
+  // Update cursor style when isRightMouseDown changes
+  useEffect(() => {
+    if (canvasElement) {
+      canvasElement.style.cursor = getCursorStyle();
+    }
+  }, [isRightMouseDown, canvasElement]);
+  
+  // Normal click handler
   const handleViewportClick = () => {
     // Only attempt to lock cursor if in editor mode and input system exists
     if (editorMode && world && world.input) {
-      world.input.setCursorLock(true);
+      // Cursor lock is now handled by right-click
+      // world.input.setCursorLock(true);
     }
+  };
+
+  // Determine cursor style based on mode and mouse state
+  const getCursorStyle = () => {
+    if (!editorMode) return 'default';
+    if (isRightMouseDown) return 'grabbing';
+    return 'grab';
   };
 
   return (
     <div
-      // ref={viewportRef} // Ref might be needed if we manage canvas internally later
       className="scene-view"
       css={css`
         flex: 1;
@@ -68,8 +201,9 @@ export function ViewportPanel({ world, editorMode, layout, togglePanel /* canvas
       {/* We need a container for the canvas owned by ClientGraphics */}
       <div 
         id="editor-canvas-area" // Add ID for targeting
+        ref={canvasContainerRef} // Add ref to get direct access to container
         className="canvas-area"
-        onClick={handleViewportClick} // Add click handler here
+        onClick={handleViewportClick} // Click handler
         css={css`
           flex: 1; 
           position: relative; 
@@ -83,6 +217,34 @@ export function ViewportPanel({ world, editorMode, layout, togglePanel /* canvas
             height: 100% !important;
             outline: none;
           }
+          
+          /* Add subtle highlight when in editor mode to indicate interactivity */
+          ${editorMode && `
+            &:hover {
+              box-shadow: inset 0 0 0 2px rgba(79, 135, 255, 0.3);
+            }
+            
+            /* Tooltip to inform users about camera controls */
+            &::after {
+              content: 'Right-click + drag to look around\\A Right-click + WASD to move';
+              white-space: pre;
+              position: absolute;
+              bottom: 10px;
+              right: 10px;
+              background: rgba(0, 0, 0, 0.7);
+              color: white;
+              padding: 8px 12px;
+              border-radius: 4px;
+              font-size: 12px;
+              pointer-events: none;
+              opacity: 0.7;
+              transition: opacity 0.2s ease;
+            }
+            
+            &:hover::after {
+              opacity: 1;
+            }
+          `}
         `}
       >
         {/* world.graphics.renderer.domElement will be appended here */}
