@@ -138,7 +138,7 @@ function MenuMainGraphics({ world, pop, push }) {
     }
     add('0.5x', 0.5)
     add('1x', 1)
-    if (dpr >= 2) add('2x', 2)
+    add('2x', 2)
     if (dpr >= 3) add('3x', dpr)
     return options
   }, [])

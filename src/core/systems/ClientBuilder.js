@@ -52,6 +52,9 @@ export class ClientBuilder extends System {
 
     this.dropTarget = null
     this.file = null
+    
+    // Flag to track if we're in editor UI mode vs legacy builder mode
+    this.editorUIMode = false
   }
 
   async init({ viewport }) {
@@ -134,10 +137,12 @@ export class ClientBuilder extends System {
     }
     // deselect if dead
     if (this.selected?.destroyed) {
+      console.log('🪦 ClientBuilder.update: Deselecting because entity is destroyed');
       this.select(null)
     }
-    // deselect if stolen
-    if (this.selected && this.selected?.data.mover !== this.world.network.id) {
+    // deselect if stolen (only in legacy builder mode)
+    if (this.selected && this.selected?.data.mover !== this.world.network.id && !this.isEditorUIMode()) {
+      console.log('🔒 ClientBuilder.update: Deselecting because entity mover changed');
       this.select(null)
     }
     // stop here if editor mode not enabled
@@ -152,6 +157,7 @@ export class ClientBuilder extends System {
     if (!isCameraControlActive && this.control.mouseRight.pressed && this.control.pointer.locked) {
       const entity = this.getEntityAtReticle()
       if (entity?.isApp) {
+        console.log('🔍 ClientBuilder.update: Deselecting for right-click inspection');
         this.select(null)
         this.control.pointer.unlock()
         this.world.ui.setMenu({ type: 'app', app: entity })
@@ -161,6 +167,7 @@ export class ClientBuilder extends System {
     else if (!this.selected && !this.control.pointer.locked && this.control.mouseRight.pressed && !isCameraControlActive) {
       const entity = this.getEntityAtPointer()
       if (entity?.isApp) {
+        console.log('🔍 ClientBuilder.update: Deselecting for pointer-unlocked inspection');
         this.select(null)
         this.world.ui.setMenu({ type: 'app', app: entity })
       }
@@ -169,6 +176,7 @@ export class ClientBuilder extends System {
     if (this.control.keyU.pressed && this.control.pointer.locked) {
       const entity = this.selected || this.getEntityAtReticle()
       if (entity?.isApp) {
+        console.log('🔗 ClientBuilder.update: Deselecting for unlink operation');
         this.select(null)
         // duplicate the blueprint
         const blueprint = {
@@ -206,6 +214,7 @@ export class ClientBuilder extends System {
           pinned: entity.data.pinned,
         })
         this.world.emit('toast', entity.data.pinned ? 'Pinned' : 'Un-pinned')
+        console.log('📌 ClientBuilder.update: Deselecting after pin/unpin');
         this.select(null)
       }
     }
@@ -236,17 +245,22 @@ export class ClientBuilder extends System {
       }
       // if selected in grab mode, place
       else if (this.selected && this.mode === 'grab') {
+        console.log('🤏 ClientBuilder.update: Deselecting in grab mode - placing object');
         this.select(null)
       }
       // if selected in translate/rotate mode, re-select/deselect
       else if (this.selected && (this.mode === 'translate' || this.mode === 'rotate') && !this.gizmoActive) {
         const entity = this.getEntityAtReticle()
         if (entity?.isApp) this.select(entity)
-        else this.select(null)
+        else {
+          console.log('🎛️ ClientBuilder.update: Deselecting in translate/rotate mode - clicking empty space');
+          this.select(null)
+        }
       }
     }
-    // deselect on pointer unlock
-    if (this.selected && !this.control.pointer.locked) {
+    // deselect on pointer unlock (only in legacy builder mode)
+    if (this.selected && !this.control.pointer.locked && !this.isEditorUIMode()) {
+      console.log('🔓 ClientBuilder.update: Deselecting due to pointer unlock (legacy mode)');
       this.select(null)
     }
     // duplicate
@@ -313,6 +327,11 @@ export class ClientBuilder extends System {
       const app = this.selected
       app.root.position.copy(this.gizmoTarget.position)
       app.root.quaternion.copy(this.gizmoTarget.quaternion)
+      // Update the app's data for networking
+      if (this.isEditorUIMode()) {
+        app.data.position = app.root.position.toArray()
+        app.data.quaternion = app.root.quaternion.toArray()
+      }
     }
     // rotate updates
     if (this.selected && this.mode === 'rotate' && this.control.controlLeft.pressed) {
@@ -325,6 +344,11 @@ export class ClientBuilder extends System {
       const app = this.selected
       app.root.position.copy(this.gizmoTarget.position)
       app.root.quaternion.copy(this.gizmoTarget.quaternion)
+      // Update the app's data for networking
+      if (this.isEditorUIMode()) {
+        app.data.position = app.root.position.toArray()
+        app.data.quaternion = app.root.quaternion.toArray()
+      }
     }
     // grab updates
     if (this.selected && this.mode === 'grab') {
@@ -523,23 +547,33 @@ export class ClientBuilder extends System {
   }
 
   setMode(mode) {
+    console.log('🔧 ClientBuilder.setMode():', mode, 'current mode:', this.mode, 'selected:', this.selected?.data?.id, 'editorUIMode:', this.isEditorUIMode());
+    
     // cleanup
     if (this.selected) {
       if (this.mode === 'grab') {
-        this.control.keyC.capture = false
-        this.control.scrollDelta.capture = false
+        if (!this.editorUIMode) {
+          this.control.keyC.capture = false
+          this.control.scrollDelta.capture = false
+        }
       }
       if (this.mode === 'translate' || this.mode === 'rotate') {
+        console.log('🗑️ ClientBuilder.setMode: Detaching gizmo during mode change');
         this.detachGizmo()
       }
     }
     // change
     this.mode = mode
+    console.log('✅ ClientBuilder.setMode: Mode changed to:', this.mode);
+    
     if (this.mode === 'grab') {
       if (this.selected) {
+        console.log('🤏 ClientBuilder.setMode: Setting up grab mode for selected app');
         const app = this.selected
-        this.control.keyC.capture = true
-        this.control.scrollDelta.capture = true
+        if (!this.editorUIMode) {
+          this.control.keyC.capture = true
+          this.control.scrollDelta.capture = true
+        }
         this.target.position.copy(app.root.position)
         this.target.quaternion.copy(app.root.quaternion)
         this.target.limit = PROJECT_MAX
@@ -547,18 +581,35 @@ export class ClientBuilder extends System {
     }
     if (this.mode === 'translate' || this.mode === 'rotate') {
       if (this.selected) {
+        console.log('🎛️ ClientBuilder.setMode: Attaching gizmo for mode:', this.mode, 'app:', this.selected.data?.id);
         this.attachGizmo(this.selected, this.mode)
+      } else {
+        console.log('⚠️ ClientBuilder.setMode: No app selected, cannot attach gizmo');
       }
     }
-    this.updateActions()
+    // Only update actions in legacy mode
+    if (!this.editorUIMode) {
+      this.updateActions()
+    }
   }
 
   select(app) {
+    console.log('🔧 ClientBuilder.select():', app?.data?.id, 'current mode:', this.mode, 'editorUIMode:', this.isEditorUIMode());
+    
+    // Add stack trace when app is undefined to debug what's deselecting
+    if (!app) {
+      console.log('❌ ClientBuilder.select() called with undefined/null. Stack trace:');
+      console.trace();
+    }
+    
     // do nothing if unchanged
     if (this.selected === app) return
+    
     // deselect existing
     if (this.selected && this.selected !== app) {
-      if (!this.selected.dead && this.selected.data.mover === this.world.network.id) {
+      console.log('🔄 ClientBuilder: Deselecting previous app:', this.selected.data?.id);
+      // Only handle mover logic if we're in legacy builder mode
+      if (!this.isEditorUIMode() && !this.selected.dead && this.selected.data.mover === this.world.network.id) {
         const app = this.selected
         app.data.mover = null
         app.data.position = app.root.position.toArray()
@@ -575,67 +626,130 @@ export class ClientBuilder extends System {
       }
       this.selected = null
       if (this.mode === 'grab') {
-        this.control.keyC.capture = false
-        this.control.scrollDelta.capture = false
+        if (!this.isEditorUIMode()) {
+          this.control.keyC.capture = false
+          this.control.scrollDelta.capture = false
+        }
       }
       if (this.mode === 'translate' || this.mode === 'rotate') {
+        console.log('🗑️ ClientBuilder: Detaching gizmo from previous selection');
         this.detachGizmo()
       }
     }
+    
     // select new (if any)
     if (app) {
-      this.addUndo({
-        name: 'move-entity',
-        entityId: app.data.id,
-        position: app.data.position.slice(),
-        quaternion: app.data.quaternion.slice(),
-      })
-      if (app.data.mover !== this.world.network.id) {
-        app.data.mover = this.world.network.id
-        app.build()
-        this.world.network.send('entityModified', { id: app.data.id, mover: app.data.mover })
+      console.log('✅ ClientBuilder: Selecting new app:', app.data?.id, 'mode:', this.mode);
+      // Only add undo and handle mover logic in legacy builder mode
+      if (!this.isEditorUIMode()) {
+        this.addUndo({
+          name: 'move-entity',
+          entityId: app.data.id,
+          position: app.data.position.slice(),
+          quaternion: app.data.quaternion.slice(),
+        })
+        if (app.data.mover !== this.world.network.id) {
+          app.data.mover = this.world.network.id
+          app.build()
+          this.world.network.send('entityModified', { id: app.data.id, mover: app.data.mover })
+        }
       }
+      
       this.selected = app
+      
       if (this.mode === 'grab') {
-        this.control.keyC.capture = true
-        this.control.scrollDelta.capture = true
+        console.log('🤏 ClientBuilder: Setting up grab mode');
+        if (!this.isEditorUIMode()) {
+          this.control.keyC.capture = true
+          this.control.scrollDelta.capture = true
+        }
         this.target.position.copy(app.root.position)
         this.target.quaternion.copy(app.root.quaternion)
         this.target.limit = PROJECT_MAX
       }
       if (this.mode === 'translate' || this.mode === 'rotate') {
+        console.log('🎛️ ClientBuilder: Attaching gizmo for mode:', this.mode);
         this.attachGizmo(app, this.mode)
       }
     }
-    // update actions
-    this.updateActions()
+    
+    // update actions only in legacy mode
+    if (!this.isEditorUIMode()) {
+      this.updateActions()
+    }
   }
 
   attachGizmo(app, mode) {
-    if (this.gizmo) this.detachGizmo()
+    console.log('🎯 ClientBuilder.attachGizmo():', app.data?.id, 'mode:', mode, 'editorUIMode:', this.isEditorUIMode());
+    
+    if (this.gizmo) {
+      console.log('🗑️ ClientBuilder: Detaching existing gizmo');
+      this.detachGizmo()
+    }
+    
+    // Get the appropriate viewport element
+    let viewportElement = this.viewport
+    if (this.isEditorUIMode()) {
+      // In editor UI mode, find the canvas element
+      const canvasContainer = document.getElementById('editor-canvas-area')
+      const canvas = canvasContainer?.querySelector('canvas')
+      console.log('🔍 ClientBuilder: Looking for canvas element:', {
+        canvasContainer: !!canvasContainer,
+        canvas: !!canvas,
+        fallbackViewport: !!this.viewport
+      });
+      viewportElement = canvas || this.viewport
+    }
+    
+    console.log('🎨 ClientBuilder: Creating gizmo with viewport:', viewportElement);
+    console.log('📷 ClientBuilder: Camera available:', !!this.world.camera);
+    console.log('🎭 ClientBuilder: Stage/scene available:', !!this.world.stage?.scene);
+    
     // create gizmo
-    this.gizmo = new TransformControls(this.world.camera, this.viewport)
+    this.gizmo = new TransformControls(this.world.camera, viewportElement)
     this.gizmo.setSize(0.7)
     this.gizmo.space = this.localSpace ? 'local' : 'world'
     this.gizmo.addEventListener('mouseDown', () => {
+      console.log('🖱️ ClientBuilder: Gizmo mouse down');
       this.gizmoActive = true
     })
     this.gizmo.addEventListener('mouseUp', () => {
+      console.log('🖱️ ClientBuilder: Gizmo mouse up');
       this.gizmoActive = false
+      // Send final position to network when gizmo is released
+      if (this.isEditorUIMode() && this.selected) {
+        const app = this.selected
+        this.world.network.send('entityModified', {
+          id: app.data.id,
+          position: app.data.position,
+          quaternion: app.data.quaternion,
+        })
+        console.log('📡 ClientBuilder: Sent final position to network');
+      }
     })
     this.gizmoTarget = new THREE.Object3D()
     this.gizmoHelper = this.gizmo.getHelper()
     // initialize it
     this.gizmoTarget.position.copy(app.root.position)
     this.gizmoTarget.quaternion.copy(app.root.quaternion)
+    
+    console.log('🎯 ClientBuilder: Adding gizmo to scene:', {
+      targetPosition: this.gizmoTarget.position.toArray(),
+      targetRotation: this.gizmoTarget.quaternion.toArray(),
+      appPosition: app.root.position.toArray()
+    });
+    
     this.world.stage.scene.add(this.gizmoTarget)
     this.world.stage.scene.add(this.gizmoHelper)
     this.gizmo.rotationSnap = SNAP_DEGREES * DEG2RAD
     this.gizmo.attach(this.gizmoTarget)
     this.gizmo.mode = mode
+    
+    console.log('✅ ClientBuilder: Gizmo attached successfully');
   }
 
   detachGizmo() {
+    console.log('🗑️ ClientBuilder.detachGizmo()');
     if (!this.gizmo) return
     this.world.stage.scene.remove(this.gizmoTarget)
     this.world.stage.scene.remove(this.gizmoHelper)
@@ -643,6 +757,7 @@ export class ClientBuilder extends System {
     this.gizmo.disconnect()
     this.gizmo.dispose()
     this.gizmo = null
+    console.log('✅ ClientBuilder: Gizmo detached successfully');
   }
 
   getEntityAtReticle() {
@@ -984,6 +1099,16 @@ export class ClientBuilder extends System {
 
       entity.destroy(true); // Destroy the entity
     }
+  }
+
+  // Method to check if we're in editor UI mode
+  isEditorUIMode() {
+    return this.editorUIMode || (this.world.ui && this.world.ui.editorMode)
+  }
+
+  // Method to set editor UI mode
+  setEditorUIMode(enabled) {
+    this.editorUIMode = enabled
   }
 }
 

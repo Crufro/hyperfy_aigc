@@ -144,7 +144,7 @@ function GeneralSettings({ world, player }) {
     }
     add('Low', 0.5)
     add('High', 1)
-    if (dpr >= 2) add('Ultra', 2)
+    add('Ultra', 2)
     if (dpr >= 3) add('Insane', dpr)
     return options
   }, [])

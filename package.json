@@ -18,7 +18,7 @@
     "real-time"
   ],
   "scripts": {
-    "dev": "node scripts/build.mjs --dev",
+    "dev": "cross-env PORT=3000 WORLD=world node scripts/build.mjs --dev",
     "build": "node scripts/build.mjs",
     "start": "node build/index.js",
     "world:clean": "node scripts/clean-world.mjs",
@@ -71,6 +71,7 @@
   "devDependencies": {
     "@babel/eslint-parser": "^7.23.10",
     "@babel/preset-react": "^7.23.10",
+    "cross-env": "^7.0.3",
     "esbuild": "^0.24.0",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",

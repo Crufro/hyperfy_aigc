@@ -65,23 +65,40 @@ export function EditorToolbar({ currentMode, setCurrentMode }) {
         </div>
         <div css={css`display: flex; gap: 5px;`}>
           <button
+            css={css`${buttonBaseStyle} ${currentMode === 'grab' ? activeButtonStyle : ''}`}
+            onClick={() => {
+              console.log('🤏 EditorToolbar: Grab button clicked');
+              setCurrentMode('grab');
+            }}
+            title="Grab Tool (G)"
+          >
+            ✋
+          </button>
+          <button
             css={css`${buttonBaseStyle} ${currentMode === 'translate' ? activeButtonStyle : ''}`}
-            onClick={() => setCurrentMode('translate')}
+            onClick={() => {
+              console.log('📐 EditorToolbar: Translate button clicked');
+              setCurrentMode('translate');
+            }}
             title="Move Tool (M)"
           >
             <img src="/icons/move.svg" alt="Move" />
           </button>
           <button
             css={css`${buttonBaseStyle} ${currentMode === 'rotate' ? activeButtonStyle : ''}`}
-            onClick={() => setCurrentMode('rotate')}
+            onClick={() => {
+              console.log('🔄 EditorToolbar: Rotate button clicked');
+              setCurrentMode('rotate');
+            }}
             title="Rotate Tool (R)"
           >
             <img src="/icons/rotate.svg" alt="Rotate" />
           </button>
           <button
-            css={css`${buttonBaseStyle} ${currentMode === 'Scale' ? activeButtonStyle : ''}`}
-            onClick={() => console.log('Scale tool clicked - TBD')}
-            title="Scale Tool (S)"
+            css={css`${buttonBaseStyle} ${currentMode === 'scale' ? activeButtonStyle : ''}`}
+            onClick={() => setCurrentMode('scale')}
+            title="Scale Tool (S) - Coming Soon"
+            disabled
           >
             <img src="/icons/scale.svg" alt="Scale" />
           </button>

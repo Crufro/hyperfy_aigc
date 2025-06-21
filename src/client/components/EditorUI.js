@@ -130,7 +130,7 @@ const TabbedPanelContainer = ({ world, app, layout, panels, activeTab, setActive
 
 export function EditorUI({ world }) {
   const [editorMode, setEditorMode] = useState(false)
-  const [currentMode, setCurrentMode] = useState('grab')
+  const [currentMode, setCurrentMode] = useState('translate')
   const [selectedApp, setSelectedApp] = useState(null);
   const [layout, setLayout] = useState(() => {
     let initialState = { ...DEFAULT_LAYOUT }; 
@@ -212,9 +212,13 @@ export function EditorUI({ world }) {
        if (entity?.isApp) {
           setApps(prevApps => prevApps.filter(app => app.data.id !== entity.data.id));
           // If the removed app was selected, deselect it
-          if (selectedApp && selectedApp.data.id === entity.data.id) {
-              setSelectedApp(null);
-          }
+          // Use a ref or closure to avoid dependency issues
+          setSelectedApp(prev => {
+            if (prev && prev.data.id === entity.data.id) {
+              return null;
+            }
+            return prev;
+          });
        }
     };
 
@@ -228,18 +232,22 @@ export function EditorUI({ world }) {
       world.events.off('entityRemoved', handleEntityRemoved);
     };
 
-  }, [world, world?.entities, world?.events, selectedApp]); // Depend on world and its systems
+  }, [world, world?.entities, world?.events]); // Depend on world and its systems
+
+  // Separate effect to synchronize selectedApp with builder.select()
+  useEffect(() => {
+    if (world.builder && editorMode) {
+      console.log('🔄 EditorUI: Syncing selectedApp with builder:', selectedApp?.data?.id);
+      world.builder.select(selectedApp);
+    }
+  }, [selectedApp, world.builder, editorMode]);
 
   // Function to handle selecting an app from ANY source (UI or Builder)
   // Ensures both UI state and Builder state are synchronized
   const handleAppSelection = (app) => {
-    // Update UI state
+    console.log('🎯 EditorUI: App selected:', app?.data?.id, 'mode:', currentMode);
+    // Update UI state (this will trigger the sync effect above)
     setSelectedApp(app);
-    // Update Builder state
-    if (world.builder) {
-       // Call builder's select method, which handles mover logic, gizmos, etc.
-       world.builder.select(app); 
-    }
   };
 
   // Function to delete the selected app (now uses builder's selection)
@@ -311,6 +319,10 @@ export function EditorUI({ world }) {
   useEffect(() => {
     const onEditorMode = (enabled) => {
       setEditorMode(enabled)
+      // Set the builder to editor UI mode when editor is active
+      if (world.builder) {
+        world.builder.setEditorUIMode(enabled)
+      }
       // We no longer need to explicitly set cursor lock to false here
       // Right-click navigation in the viewport will now control this
     }
@@ -320,12 +332,27 @@ export function EditorUI({ world }) {
     }
   }, [world])
 
-  // Add keydown listener for Delete key
+  // Add keydown listener for Delete key and tool shortcuts
   useEffect(() => {
     if (!editorMode) return;
     const handleKeyDown = (e) => {
+      // Ignore if typing in an input field
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        return;
+      }
+      
       if (e.key === 'Delete' && selectedApp) {
         handleDeleteSelectedApp();
+      }
+      // Tool shortcuts
+      if (e.key === '1' || e.key.toLowerCase() === 'g') {
+        setCurrentMode('grab');
+      }
+      if (e.key === '2' || e.key.toLowerCase() === 'm') {
+        setCurrentMode('translate');
+      }
+      if (e.key === '3' || e.key.toLowerCase() === 'r') {
+        setCurrentMode('rotate');
       }
       // Handle Escape key for menus (existing logic)
       if (e.key === 'Escape') {
@@ -342,7 +369,7 @@ export function EditorUI({ world }) {
     };
     // Include selectedApp in dependencies to re-bind if selection changes (though listener logic depends on it)
     // Add world.builder dependency since we now call methods on it
-  }, [editorMode, world, selectedApp, handleDeleteSelectedApp]); // Add handleDeleteSelectedApp dependency
+  }, [editorMode, world, selectedApp, handleDeleteSelectedApp, setCurrentMode]); // Add handleDeleteSelectedApp dependency
 
   // Reset layout function - update to include new defaults
   const resetLayout = () => {
@@ -378,7 +405,9 @@ export function EditorUI({ world }) {
 
   // Handle mode changes
   useEffect(() => {
+    console.log('🔄 EditorUI: Mode change effect triggered. editorMode:', editorMode, 'currentMode:', currentMode, 'builder available:', !!world.builder);
     if (editorMode && world.builder) {
+      console.log('🎯 EditorUI: Setting builder mode to:', currentMode);
       world.builder.setMode(currentMode)
     }
   }, [currentMode, editorMode, world.builder])

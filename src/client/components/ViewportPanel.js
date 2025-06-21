@@ -223,27 +223,6 @@ export function ViewportPanel({ world, editorMode, layout, togglePanel /* canvas
             &:hover {
               box-shadow: inset 0 0 0 2px rgba(79, 135, 255, 0.3);
             }
-            
-            /* Tooltip to inform users about camera controls */
-            &::after {
-              content: 'Right-click + drag to look around\\A Right-click + WASD to move';
-              white-space: pre;
-              position: absolute;
-              bottom: 10px;
-              right: 10px;
-              background: rgba(0, 0, 0, 0.7);
-              color: white;
-              padding: 8px 12px;
-              border-radius: 4px;
-              font-size: 12px;
-              pointer-events: none;
-              opacity: 0.7;
-              transition: opacity 0.2s ease;
-            }
-            
-            &:hover::after {
-              opacity: 1;
-            }
           `}
         `}
       >
@@ -271,7 +250,7 @@ function ResolutionControl({ world }) {
     };
     add('0.5x', 0.5);
     add('1x', 1);
-    if (devicePixelRatio >= 2) add('2x', 2);
+    add('2x', 2);
     if (![0.5, 1, 2].includes(devicePixelRatio)) {
        add(`${devicePixelRatio.toFixed(1)}x`, devicePixelRatio);
     }
